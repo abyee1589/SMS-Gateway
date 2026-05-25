@@ -14,7 +14,12 @@ async function bootstrap() {
     defaultVersion: '1',
   });
 
-  app.use(helmet());
+  // 1. Configure Helmet to be less restrictive with cross-origin requests
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
   app.use(compression());
 
   app.useGlobalPipes(
@@ -28,16 +33,32 @@ async function bootstrap() {
     }),
   );
 
+  // 2. Dynamically allow your production frontend and local environment
+  const allowedOrigins = [
+    'https://sms-gateway-frontend.onrender.com', // Your live frontend
+    'http://localhost:3000',                     // Next.js local port
+    // 'http://localhost:5173',                     // Vite local port (just in case)
+  ];
+
   app.enableCors({
-    origin: ['http://localhost:3000'],
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like Postman or mobile apps)
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS', // Added OPTIONS for preflight requests
     allowedHeaders: 'Content-Type, Accept, Authorization',
   });
 
   const port = Number(process.env.PORT) || 5000;
   await app.listen(port);
 
-  console.log(`API running on http://localhost:${port}/api/v1`);
+  console.log(`API running on port ${port}`);
 }
 bootstrap();
