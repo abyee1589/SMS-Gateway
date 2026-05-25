@@ -54,20 +54,3 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
-
-# Dependencies (Render will install these automatically)
-node_modules/
-
-# Local Environment Variables (Never push your secrets to GitHub!)
-.env
-.env.local
-
-# Logs and Debug files
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.logs/
-
-# Build outputs (if using TypeScript or a bundler)
-dist/
-build/
