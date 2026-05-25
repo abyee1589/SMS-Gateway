@@ -1,0 +1,31 @@
+version: '3.8'
+services:
+  # The Primary Database
+  postgres:
+    image: postgres:15
+    container_name: nexus_db
+    restart: always
+    environment:
+      POSTGRES_USER: nexus_admin
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: nexus_sms
+    ports:
+      - "5433:5432"
+
+  # The Message Queue (Memory-based for speed)
+  redis:
+    image: redis:7-alpine
+    container_name: nexus_redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  # Optional: pgAdmin for you to see the data easily
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: nexus_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@nexus.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"

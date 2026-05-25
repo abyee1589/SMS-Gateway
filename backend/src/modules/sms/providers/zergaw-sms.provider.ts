@@ -1,0 +1,104 @@
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import {
+  SendSmsInput,
+  SendSmsResult,
+  SmsGatewayProvider,
+} from './sms-provider.interface';
+
+@Injectable()
+export class ZergawSmsProvider implements SmsGatewayProvider {
+  constructor(private readonly configService: ConfigService) {}
+
+  async sendSms(input: SendSmsInput): Promise<SendSmsResult> {
+    const url = this.configService.get<string>('ZERGAW_SMS_URL');
+    const username = this.configService.get<string>('ZERGAW_SMS_USERNAME');
+    const password = this.configService.get<string>('ZERGAW_SMS_PASSWORD');
+
+    if (!url || !username || !password) {
+      return {
+        normalizedStatus: 'failed',
+        rawStatus: 'config_error',
+        errorCode: 'ZERGAW_CONFIG_ERROR',
+        errorMessage: 'Zergaw SMS gateway is not configured',
+        failureType: 'permanent',
+      };
+    }
+
+    try {
+      const params = new URLSearchParams({
+        username,
+        password,
+        to: input.recipient.replace(/^\+/, ''),
+        content: input.content,
+      });
+
+      const response = await fetch(`${url}?${params.toString()}`);
+      const text = await response.text();
+      const lower = text.toLowerCase();
+
+      if (!response.ok) {
+        return {
+          normalizedStatus: 'failed',
+          rawStatus: text || `HTTP ${response.status}`,
+          errorCode: `HTTP_${response.status}`,
+          errorMessage: text || `HTTP ${response.status}`,
+          failureType: response.status >= 500 ? 'temporary' : 'permanent',
+          raw: {
+            httpStatus: response.status,
+            body: text,
+          },
+        };
+      }
+
+      if (
+        lower.includes('failure instance') ||
+        lower.includes('traceback') ||
+        lower.includes('precondition_failed') ||
+        lower.includes('channelclosed') ||
+        lower.includes('error')
+      ) {
+        return {
+          normalizedStatus: 'failed',
+          rawStatus: text,
+          errorCode: 'ZERGAW_GATEWAY_ERROR',
+          errorMessage: text,
+          failureType: 'temporary',
+          raw: text,
+        };
+      }
+
+      if (lower.startsWith('success')) {
+        const match = text.match(/"([^"]+)"/);
+        const providerMessageId = match?.[1];
+
+        return {
+            normalizedStatus: 'sent',
+            rawStatus: text,
+            providerMessageId,
+            acceptedAt: new Date(),
+            raw: text,
+        };
+      }
+
+      return {
+        normalizedStatus: 'failed',
+        rawStatus: text,
+        errorCode: 'ZERGAW_UNKNOWN_RESPONSE',
+        errorMessage: text || 'Unknown Zergaw gateway response',
+        failureType: 'unknown',
+        raw: text,
+      };
+    } catch (error) {
+      return {
+        normalizedStatus: 'failed',
+        rawStatus: 'network_error',
+        errorCode: 'ZERGAW_NETWORK_ERROR',
+        errorMessage:
+          error instanceof Error ? error.message : 'Failed to call Zergaw gateway',
+        failureType: 'temporary',
+        raw: error,
+      };
+    }
+  }
+}

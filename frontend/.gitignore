@@ -1,0 +1,48 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# Dependencies
+/node_modules
+node_modules/
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# Testing
+/coverage
+
+# Next.js build output
+/.next/
+.next/
+/out/
+out/
+
+# Production build tracking
+/build
+
+# Miscellaneous OS files
+.DS_Store
+*.pem
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Strictly protect environment variables (No accidental leaks!)
+.env
+.env.local
+.env.production
+.env.development
+.env*.local
+
+# Hosting configurations
+.vercel
+
+# TypeScript build cache
+*.tsbuildinfo
+next-env.d.ts
