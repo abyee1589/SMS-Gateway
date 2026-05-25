@@ -1,4 +1,6 @@
-export const API_BASE_URL = 'http://localhost:5000/api/v1';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL 
+  ? `${process.env.NEXT_PUBLIC_API_URL}/api/v1` 
+  : 'http://localhost:5000/api/v1';
 
 export async function apiFetch<T>(
   path: string,
@@ -13,7 +15,6 @@ export async function apiFetch<T>(
       ...(options?.headers || {}),
     },
   });
-
   if (!res.ok) {
     // 1. Try to parse the error as JSON
     let errorData;
