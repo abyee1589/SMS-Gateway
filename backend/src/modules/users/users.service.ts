@@ -106,11 +106,13 @@ export class UsersService {
   }
 
   async findByEmail(email: string, includePassword = false) {
-    return this.usersRepository.findOne({
-      where: { email: email.toLowerCase() },
-      select: includePassword 
-        ? ['id', 'email', 'password', 'role', 'isActive', 'tenantId', 'createdAt', 'updatedAt'] // Explicitly fetch everything including password
-        : undefined, // Default fallback behavior (leaves password hidden)
-    });
+  const qb = this.usersRepository.createQueryBuilder('user')
+    .where('LOWER(user.email) = LOWER(:email)', { email: email.toLowerCase() });
+
+  if (includePassword) {
+    qb.addSelect('user.password'); // ✅ Explicitly appended after the base query structure is set
+  }
+
+  return qb.getOne();
 }
 }
