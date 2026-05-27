@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
-type UserRole = 'manager' | 'admin' | 'user';
+type UserRole = 'super_admin' | 'admin' | 'user';
 
 type RoleGuardProps = {
   currentUserRole?: string;

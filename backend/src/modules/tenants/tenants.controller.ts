@@ -27,7 +27,7 @@ export class TenantsController {
   }
 
   @Patch(':id/subscribe')
-  @Roles(UserRole.MANAGER)
+  @Roles(UserRole.SUPER_ADMIN)
   subscribeTenant(
     @Param('id') tenantId: string,
     @Body() dto: SubscribeTenantDto,

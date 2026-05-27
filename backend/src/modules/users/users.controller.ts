@@ -29,14 +29,14 @@ export class UsersController {
   ) {}
 
   @Get()
-  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   findAll(@Req() req: { user: { tenantId: string } }) {
     return this.usersService.findAll(req.user.tenantId);
   }
 
 
   @Post()
-  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   async create(
     @Body() dto: AdminCreateUserDto,
     @Req() req: { user: { id: string; email: string; tenantId: string } },
@@ -77,8 +77,8 @@ export class UsersController {
       };
     },
   ) {
-    if (req.user.role !== 'manager') {
-      throw new ForbiddenException('Only manager can delete users');
+    if (req.user.role !== 'super_admin') {
+      throw new ForbiddenException('Only super admin can delete users');
     }
 
     const result = await this.usersService.deleteUser(id, req.user);
@@ -97,7 +97,7 @@ export class UsersController {
     
 
   @Patch(':id/role')
-  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   async updateRole(
     @Param('id') id: string,
     @Body() dto: UpdateUserRoleDto,
@@ -121,7 +121,7 @@ export class UsersController {
   }
 
   @Patch(':id/status')
-  @Roles(UserRole.ADMIN, UserRole.MANAGER)
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   async updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateUserStatusDto,

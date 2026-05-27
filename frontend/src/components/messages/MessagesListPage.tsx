@@ -128,6 +128,9 @@ function getApiPathForTab(tab: MessagesTab) {
 const actionButtonBase =
   'inline-flex h-8 w-24 items-center justify-center whitespace-nowrap rounded-lg border px-2 text-[11px] font-bold transition disabled:opacity-60';
 
+const mobileActionButtonBase =
+  'inline-flex h-9 flex-1 items-center justify-center whitespace-nowrap rounded-xl border px-3 text-xs font-bold transition disabled:opacity-60';
+
 export default function MessagesListPage({
   initialTab,
 }: {
@@ -261,14 +264,79 @@ export default function MessagesListPage({
     router.push(`/messages/new?${params.toString()}`);
   }
 
+  function renderActions(message: Message, mobile = false) {
+    const retryable = ['failed', 'dead_letter'].includes(message.status);
+    const cancellable = message.status === 'scheduled';
+    const reschedulable = message.status === 'cancelled';
+
+    const base = mobile ? mobileActionButtonBase : actionButtonBase;
+
+    return (
+      <>
+        {retryable ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setRetryConfirmId(message.id);
+            }}
+            disabled={actionLoadingId === message.id}
+            className={`${base} border-red-200 bg-red-50 text-red-700 hover:bg-red-100`}
+          >
+            Retry
+          </button>
+        ) : null}
+
+        {cancellable ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              cancelScheduledMessage(message.id);
+            }}
+            disabled={actionLoadingId === message.id}
+            className={`${base} border-red-200 bg-red-50 text-red-700 hover:bg-red-100`}
+          >
+            {actionLoadingId === message.id ? 'Cancelling' : 'Cancel'}
+          </button>
+        ) : null}
+
+        {reschedulable ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              scheduleAgain(message);
+            }}
+            className={`${base} border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100`}
+          >
+            Reschedule
+          </button>
+        ) : null}
+
+        {!retryable && !cancellable && !reschedulable ? (
+          <span
+            className={
+              mobile
+                ? 'inline-flex h-9 flex-1 items-center justify-center text-xs text-slate-400'
+                : 'inline-flex h-8 w-24 items-center justify-center text-xs text-slate-400'
+            }
+          >
+            —
+          </span>
+        ) : null}
+      </>
+    );
+  }
+
   return (
     <div className={ui.page}>
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 bg-gradient-to-r from-slate-950 to-slate-800 px-6 py-5 text-white">
+        <div className="border-b border-slate-100 bg-gradient-to-r from-slate-950 to-slate-800 px-4 py-5 text-white sm:px-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
+            <div className="min-w-0">
               <h2 className="text-2xl font-bold">Messages</h2>
-              <p className="mt-1 text-sm text-slate-300">
+              <p className="mt-1 text-sm leading-6 text-slate-300">
                 Monitor scheduled, sent, delivered, failed, and cancelled SMS
                 messages.
               </p>
@@ -277,15 +345,15 @@ export default function MessagesListPage({
             <button
               type="button"
               onClick={() => router.push('/messages/new')}
-              className="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-950 shadow-sm transition hover:bg-slate-100"
+              className="inline-flex w-full items-center justify-center rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-950 shadow-sm transition hover:bg-slate-100 sm:w-auto"
             >
               + New Message
             </button>
           </div>
         </div>
 
-        <div className="border-b border-slate-100 bg-slate-50 p-4">
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+        <div className="border-b border-slate-100 bg-slate-50 p-3 sm:p-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
             {tabs.map((tab) => {
               const active = initialTab === tab.key;
 
@@ -293,7 +361,7 @@ export default function MessagesListPage({
                 <Link
                   key={tab.key}
                   href={tab.href}
-                  className={`rounded-xl border px-4 py-3 text-left transition ${
+                  className={`rounded-xl border px-3 py-3 text-left transition sm:px-4 ${
                     active
                       ? 'border-blue-200 bg-white shadow-sm ring-2 ring-blue-100'
                       : 'border-transparent bg-transparent hover:border-slate-200 hover:bg-white'
@@ -315,7 +383,7 @@ export default function MessagesListPage({
           </div>
         </div>
 
-        <div className="p-6">
+        <div className="p-4 sm:p-6">
           {error ? <div className={ui.alertError}>{error}</div> : null}
 
           {pageLoading ? (
@@ -330,30 +398,101 @@ export default function MessagesListPage({
               </p>
             </div>
           ) : (
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
-              <div className="overflow-x-auto">
-                <table className="w-full table-fixed text-sm">
-                  <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                    <tr>
-                      <th className="w-32 px-3 py-3">Recipient</th>
-                      <th className="px-3 py-3">Content</th>
-                      <th className="w-32 px-3 py-3">Status</th>
-                      <th className="w-36 px-3 py-3">Scheduled At</th>
-                      <th className="w-36 px-3 py-3">Created</th>
-                      <th className="w-36 px-3 py-3">Sent At</th>
-                      <th className="w-32 px-3 py-3 text-right">Action</th>
-                    </tr>
-                  </thead>
+            <>
+              <div className="space-y-3 md:hidden">
+                {visibleMessages.map((message) => (
+                  <div
+                    key={message.id}
+                    onClick={() => openMessage(message.id)}
+                    className="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-words font-bold text-slate-900">
+                          {message.recipient}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-400">
+                          Created: {formatDate(message.createdAt)}
+                        </p>
+                      </div>
 
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {visibleMessages.map((message) => {
-                      const retryable = ['failed', 'dead_letter'].includes(
-                        message.status,
-                      );
-                      const cancellable = message.status === 'scheduled';
-                      const reschedulable = message.status === 'cancelled';
+                      <span
+                        className={`inline-flex h-7 w-24 shrink-0 items-center justify-center rounded-full border px-2 text-[11px] font-bold ${getStatusColor(
+                          message.status,
+                        )}`}
+                        title={formatStatus(message.status)}
+                      >
+                        <span className="truncate">
+                          {formatStatus(message.status)}
+                        </span>
+                      </span>
+                    </div>
 
-                      return (
+                    <p className="mt-3 whitespace-normal break-words text-sm leading-6 text-slate-600">
+                      {message.content}
+                    </p>
+
+                    {message.errorMessage ? (
+                      <p className="mt-2 whitespace-normal break-words text-xs font-medium leading-5 text-red-600">
+                        Error: {message.errorMessage}
+                      </p>
+                    ) : null}
+
+                    <div className="mt-4 grid grid-cols-1 gap-2 text-xs text-slate-500">
+                      <div className="flex justify-between gap-3">
+                        <span className="font-semibold text-slate-400">
+                          Scheduled
+                        </span>
+                        <span className="text-right">
+                          {formatDate(message.scheduledAt)}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between gap-3">
+                        <span className="font-semibold text-slate-400">
+                          Sent
+                        </span>
+                        <span className="text-right">
+                          {formatDate(message.sentAt)}
+                        </span>
+                      </div>
+
+                      {message.deliveredAt ? (
+                        <div className="flex justify-between gap-3">
+                          <span className="font-semibold text-slate-400">
+                            Delivered
+                          </span>
+                          <span className="text-right">
+                            {formatDate(message.deliveredAt)}
+                          </span>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-4 flex gap-2">
+                      {renderActions(message, true)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden overflow-hidden rounded-2xl border border-slate-200 md:block">
+                <div className="overflow-x-auto">
+                  <table className="w-full table-fixed text-sm">
+                    <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="w-32 px-3 py-3">Recipient</th>
+                        <th className="px-3 py-3">Content</th>
+                        <th className="w-32 px-3 py-3">Status</th>
+                        <th className="w-36 px-3 py-3">Scheduled At</th>
+                        <th className="w-36 px-3 py-3">Created</th>
+                        <th className="w-36 px-3 py-3">Sent At</th>
+                        <th className="w-32 px-3 py-3 text-right">Action</th>
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {visibleMessages.map((message) => (
                         <tr
                           key={message.id}
                           onClick={() => openMessage(message.id)}
@@ -402,70 +541,23 @@ export default function MessagesListPage({
 
                           <td className="w-32 px-3 py-4 text-right align-top">
                             <div className="flex justify-end">
-                              {retryable ? (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setRetryConfirmId(message.id);
-                                  }}
-                                  disabled={actionLoadingId === message.id}
-                                  className={`${actionButtonBase} border-red-200 bg-red-50 text-red-700 hover:bg-red-100`}
-                                >
-                                  Retry
-                                </button>
-                              ) : null}
-
-                              {cancellable ? (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    cancelScheduledMessage(message.id);
-                                  }}
-                                  disabled={actionLoadingId === message.id}
-                                  className={`${actionButtonBase} border-red-200 bg-red-50 text-red-700 hover:bg-red-100`}
-                                >
-                                  {actionLoadingId === message.id
-                                    ? 'Cancelling'
-                                    : 'Cancel'}
-                                </button>
-                              ) : null}
-
-                              {reschedulable ? (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    scheduleAgain(message);
-                                  }}
-                                  className={`${actionButtonBase} border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100`}
-                                >
-                                  Reschedule
-                                </button>
-                              ) : null}
-
-                              {!retryable && !cancellable && !reschedulable ? (
-                                <span className="inline-flex h-8 w-24 items-center justify-center text-xs text-slate-400">
-                                  —
-                                </span>
-                              ) : null}
+                              {renderActions(message)}
                             </div>
                           </td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
+            </>
           )}
         </div>
       </div>
 
       {retryConfirmId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
             <h3 className="text-lg font-black text-slate-900">
               Retry failed message?
             </h3>
@@ -475,7 +567,7 @@ export default function MessagesListPage({
               the provider accepts it.
             </p>
 
-            <div className="mt-6 flex justify-end gap-3">
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={() => setRetryConfirmId(null)}

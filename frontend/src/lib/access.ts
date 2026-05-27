@@ -1,4 +1,4 @@
-export type UserRole = 'manager' | 'admin' | 'user';
+export type UserRole = 'super_admin' | 'admin' | 'user';
 
 export type NavItem = {
   href: string;
@@ -11,38 +11,38 @@ export const navItems: NavItem[] = [
   {
     href: '/dashboard',
     label: 'Dashboard',
-    roles: ['manager', 'admin', 'user'],
+    roles: ['super_admin', 'admin', 'user'],
   },
 
   {
     href: '/messages',
     label: 'Messages',
-    roles: ['manager', 'admin', 'user'],
+    roles: ['super_admin', 'admin', 'user'],
     children: [
       {
         href: '/messages/new',
         label: 'New',
-        roles: ['manager', 'admin', 'user'],
+        roles: ['super_admin', 'admin', 'user'],
       },
       {
         href: '/messages/sent',
         label: 'Sent',
-        roles: ['manager', 'admin', 'user'],
+        roles: ['super_admin', 'admin', 'user'],
       },
       {
         href: '/messages/failed',
         label: 'Failed',
-        roles: ['manager', 'admin', 'user'],
+        roles: ['super_admin', 'admin', 'user'],
       },
       {
         href: '/messages/scheduled',
         label: 'Scheduled',
-        roles: ['manager', 'admin', 'user'],
+        roles: ['super_admin', 'admin', 'user'],
       },
       {
         href: '/messages/cancelled',
         label: 'Cancelled',
-        roles: ['manager', 'admin', 'user'],
+        roles: ['super_admin', 'admin', 'user'],
       },
     ],
   },
@@ -50,31 +50,31 @@ export const navItems: NavItem[] = [
   {
     href: '/contacts',
     label: 'Contacts',
-    roles: ['manager', 'admin', 'user'],
+    roles: ['super_admin', 'admin', 'user'],
   },
 
   {
     href: '/campaigns',
     label: 'Campaigns',
-    roles: ['manager', 'admin', 'user'],
+    roles: ['super_admin', 'admin', 'user'],
   },
 
   {
     href: '/contact-groups',
     label: 'Groups',
-    roles: ['manager', 'admin', 'user'],
+    roles: ['super_admin', 'admin', 'user'],
   },
 
   {
     href: '/users',
     label: 'Users',
-    roles: ['manager'],
+    roles: ['super_admin'],
   },
 
   {
     href: '/audit-logs',
     label: 'Audit Logs',
-    roles: ['manager', 'admin'],
+    roles: ['super_admin', 'admin'],
   },
 ];
 
@@ -101,5 +101,5 @@ export function getAllowedRolesForPath(
       pathname.startsWith(`${nav.href}/`),
   );
 
-  return item?.roles ?? ['manager', 'admin', 'user'];
+  return item?.roles ?? ['super_admin', 'admin', 'user'];
 }

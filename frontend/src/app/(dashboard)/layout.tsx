@@ -17,10 +17,12 @@ import {
   IconBellRinging,
   IconClipboardList,
   IconDashboard,
+  IconMenu2,
   IconMessage2,
   IconSpeakerphone,
   IconUsers,
   IconUsersGroup,
+  IconX,
 } from '@tabler/icons-react';
 
 type CurrentUser = {
@@ -28,6 +30,7 @@ type CurrentUser = {
   email: string;
   role: string;
 };
+
 type SidebarIcon = ComponentType<{
   size?: number;
   stroke?: number;
@@ -63,8 +66,8 @@ export default function DashboardLayout({
   const [loading, setLoading] = useState(true);
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({});
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  
 
   useEffect(() => {
     async function checkAuth() {
@@ -128,6 +131,11 @@ export default function DashboardLayout({
     setOpenMenus({
       [activeParent.href]: true,
     });
+  }, [pathname]);
+
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+    setProfileOpen(false);
   }, [pathname]);
 
   const allowedRoles = getAllowedRolesForPath(pathname);
@@ -196,17 +204,21 @@ export default function DashboardLayout({
     return email.charAt(0).toUpperCase();
   }
 
-  return (
-    <div className="flex h-screen overflow-hidden bg-gray-50">
-      <aside
-        className={`hidden border-r border-slate-800 bg-slate-950 text-white transition-all duration-300 md:flex md:flex-col ${
-          sidebarOpen ? 'md:w-72' : 'md:w-20'
-        }`}
-      >
+  function SidebarContent({
+    compact = false,
+    mobile = false,
+  }: {
+    compact?: boolean;
+    mobile?: boolean;
+  }) {
+    const showLabels = mobile || !compact;
+
+    return (
+      <>
         <div className="border-b border-slate-800 px-4 py-5">
           <div
             className={`flex items-center ${
-              sidebarOpen ? 'justify-between gap-3' : 'justify-center'
+              showLabels ? 'justify-between gap-3' : 'justify-center'
             }`}
           >
             <div className="flex min-w-0 items-center gap-3">
@@ -214,9 +226,9 @@ export default function DashboardLayout({
                 Z
               </div>
 
-              {sidebarOpen ? (
+              {showLabels ? (
                 <div className="min-w-0">
-                  <h2 className="truncate text-xl font-bold tracking-tight text-blue-400">
+                  <h2 className="truncate text-base font-bold tracking-tight text-blue-400 sm:text-xl">
                     Zergaw SMS Gateway
                   </h2>
                   <p className="mt-0.5 truncate text-xs text-slate-400">
@@ -225,10 +237,21 @@ export default function DashboardLayout({
                 </div>
               ) : null}
             </div>
+
+            {mobile ? (
+              <button
+                type="button"
+                onClick={() => setMobileSidebarOpen(false)}
+                className="rounded-xl p-2 text-slate-300 transition hover:bg-slate-900 hover:text-white"
+                aria-label="Close menu"
+              >
+                <IconX size={20} stroke={2} />
+              </button>
+            ) : null}
           </div>
         </div>
 
-        <nav className="flex-1 space-y-2 overflow-hidden px-4 py-5">
+        <nav className="flex-1 space-y-2 overflow-y-auto px-3 py-4 sm:px-4 sm:py-5">
           {navItems
             .filter((item) => canAccess(currentUser?.role, item.roles))
             .map((item) => {
@@ -252,37 +275,37 @@ export default function DashboardLayout({
                     <button
                       type="button"
                       onClick={() => handleParentMenuClick(item.href)}
-                      title={!sidebarOpen ? item.label : undefined}
+                      title={!showLabels ? item.label : undefined}
                       className={`flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-sm font-medium transition ${
                         active
                           ? 'bg-blue-600 text-white shadow-sm'
                           : 'text-slate-300 hover:bg-slate-900 hover:text-white'
-                      } ${!sidebarOpen ? 'justify-center px-0' : ''}`}
+                      } ${!showLabels ? 'justify-center px-0' : ''}`}
                     >
-                      {sidebarOpen ? (
-  <>
-    <span className="flex min-w-0 items-center gap-3">
-      <Icon size={18} stroke={2} className="shrink-0" />
-      <span className="truncate">{item.label}</span>
-    </span>
+                      {showLabels ? (
+                        <>
+                          <span className="flex min-w-0 items-center gap-3">
+                            <Icon size={18} stroke={2} className="shrink-0" />
+                            <span className="truncate">{item.label}</span>
+                          </span>
 
-    <span
-      className={`text-xs transition-transform ${
-        menuOpen ? 'rotate-90' : ''
-      }`}
-    >
-      ›
-    </span>
-  </>
-) : (
-  <Icon size={21} stroke={2} className="shrink-0" />
-)}
+                          <span
+                            className={`text-xs transition-transform ${
+                              menuOpen ? 'rotate-90' : ''
+                            }`}
+                          >
+                            ›
+                          </span>
+                        </>
+                      ) : (
+                        <Icon size={21} stroke={2} className="shrink-0" />
+                      )}
                     </button>
                   ) : (
                     <Link
                       href={item.href}
                       scroll={false}
-                      title={!sidebarOpen ? item.label : undefined}
+                      title={!showLabels ? item.label : undefined}
                       onClick={() => {
                         resetScroll();
                         setOpenMenus({});
@@ -291,20 +314,24 @@ export default function DashboardLayout({
                         active
                           ? 'bg-blue-600 text-white shadow-sm'
                           : 'text-slate-300 hover:bg-slate-900 hover:text-white'
-                      } ${!sidebarOpen ? 'px-0 text-center' : ''}`}
+                      } ${!showLabels ? 'px-0 text-center' : ''}`}
                     >
-                      {sidebarOpen ? (
-  <span className="flex min-w-0 items-center gap-3">
-    <Icon size={18} stroke={2} className="shrink-0" />
-    <span className="truncate">{item.label}</span>
-  </span>
-) : (
-  <Icon size={21} stroke={2} className="mx-auto shrink-0" />
-)}
+                      {showLabels ? (
+                        <span className="flex min-w-0 items-center gap-3">
+                          <Icon size={18} stroke={2} className="shrink-0" />
+                          <span className="truncate">{item.label}</span>
+                        </span>
+                      ) : (
+                        <Icon
+                          size={21}
+                          stroke={2}
+                          className="mx-auto shrink-0"
+                        />
+                      )}
                     </Link>
                   )}
 
-                  {hasChildren && sidebarOpen ? (
+                  {hasChildren && showLabels ? (
                     <div
                       className={`ml-4 overflow-hidden border-l border-slate-800 pl-3 transition-all duration-300 ease-in-out ${
                         menuOpen
@@ -339,7 +366,7 @@ export default function DashboardLayout({
         </nav>
 
         <div className="border-t border-slate-800 px-4 py-4">
-          {sidebarOpen ? (
+          {showLabels ? (
             <div className="rounded-xl bg-slate-900 px-4 py-3">
               <p className="truncate text-sm font-medium text-white">
                 {currentUser?.email ?? 'User'}
@@ -354,34 +381,64 @@ export default function DashboardLayout({
             </div>
           )}
         </div>
+      </>
+    );
+  }
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-gray-50">
+      {mobileSidebarOpen ? (
+        <div className="fixed inset-0 z-40 md:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setMobileSidebarOpen(false)}
+            aria-label="Close sidebar overlay"
+          />
+
+          <aside className="relative z-50 flex h-full w-[17rem] max-w-[78vw] flex-col bg-slate-950 text-white shadow-2xl">   
+             <SidebarContent mobile />
+          </aside>
+        </div>
+      ) : null}
+
+      <aside
+        className={`hidden border-r border-slate-800 bg-slate-950 text-white transition-all duration-300 md:flex md:flex-col ${
+          sidebarOpen ? 'md:w-72' : 'md:w-20'
+        }`}
+      >
+        <SidebarContent compact={!sidebarOpen} />
       </aside>
 
       <main ref={mainRef} className="h-screen min-w-0 flex-1 overflow-y-auto">
-        <header className="sticky top-0 z-20 border-b border-gray-200 bg-white/90 backdrop-blur">
-          <div className="flex items-center justify-between gap-4 px-6 py-4">
+        <header className="sticky top-0 z-30 border-b border-gray-200 bg-white/90 backdrop-blur">
+          <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
             <div className="flex min-w-0 items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setMobileSidebarOpen(true)}
+                className="inline-flex rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-50 md:hidden"
+                aria-label="Open sidebar"
+              >
+                <IconMenu2 size={18} stroke={2} />
+              </button>
+
               <button
                 type="button"
                 onClick={() => setSidebarOpen((current) => !current)}
                 className="hidden rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-50 md:inline-flex"
                 aria-label="Toggle sidebar"
               >
-                ☰
+                <IconMenu2 size={18} stroke={2} />
               </button>
 
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-sm font-black text-white md:hidden">
-                  Z
-                </div>
-
-                <div className="min-w-0">
-                  <h1 className="truncate text-2xl font-bold text-gray-900">
-                    NexusMsg Dashboard
-                  </h1>
-                  <p className="mt-1 truncate text-sm text-gray-500">
-                    Manage campaigns, contacts, delivery, and users.
-                  </p>
-                </div>
+              <div className="min-w-0">
+                <h1 className="truncate text-lg font-bold text-gray-900 sm:text-2xl">
+                  NexusMsg Dashboard
+                </h1>
+                <p className="mt-0.5 hidden truncate text-sm text-gray-500 sm:block">
+                  Manage campaigns, contacts, delivery, and users.
+                </p>
               </div>
             </div>
 
@@ -389,7 +446,7 @@ export default function DashboardLayout({
               <button
                 type="button"
                 onClick={() => setProfileOpen((current) => !current)}
-                className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 sm:gap-3 sm:px-3"
               >
                 <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-xs font-bold text-white">
                   {getInitials(currentUser?.email)}
@@ -403,7 +460,7 @@ export default function DashboardLayout({
               </button>
 
               {profileOpen ? (
-                <div className="absolute right-0 mt-2 w-64 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+                <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
                   <div className="border-b border-slate-100 px-4 py-3">
                     <p className="truncate text-sm font-bold text-slate-900">
                       {currentUser?.email ?? 'User'}
@@ -414,22 +471,22 @@ export default function DashboardLayout({
                   </div>
 
                   <button
-  type="button"
-  onClick={() => {
-    setProfileOpen(false);
-    handleLogout();
-  }}
-  className="block w-full px-4 py-3 text-left text-sm font-semibold text-red-600 transition hover:bg-red-50"
->
-  Logout
-</button>
+                    type="button"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      handleLogout();
+                    }}
+                    className="block w-full px-4 py-3 text-left text-sm font-semibold text-red-600 transition hover:bg-red-50"
+                  >
+                    Logout
+                  </button>
                 </div>
               ) : null}
             </div>
           </div>
         </header>
 
-        <div key={pathname} className="min-h-full p-6">
+        <div key={pathname} className="min-h-full overflow-x-hidden p-4 sm:p-6">
           {loading ? (
             <div className="text-gray-500">Loading...</div>
           ) : hasPageAccess ? (

@@ -21,7 +21,9 @@ function getMinScheduleDateTime() {
 export default function NewMessagePage() {
   const searchParams = useSearchParams();
 
-  const [recipient, setRecipient] = useState(() => searchParams.get('recipient') ?? '');
+  const [recipient, setRecipient] = useState(
+    () => searchParams.get('recipient') ?? '',
+  );
   const [content, setContent] = useState(() => searchParams.get('content') ?? '');
   const [sendMode, setSendMode] = useState<SendMode>(() =>
     searchParams.get('mode') === 'schedule' ? 'schedule' : 'now',
@@ -34,9 +36,9 @@ export default function NewMessagePage() {
     const contentParam = searchParams.get('content');
     const modeParam = searchParams.get('mode');
 
-    setRecipient(recipientParam ?? '');
-    setContent(contentParam ?? '');
-    setSendMode(modeParam === 'schedule' ? 'schedule' : 'now');
+    if (recipientParam !== null) setRecipient(recipientParam);
+    if (contentParam !== null) setContent(contentParam);
+    if (modeParam === 'schedule') setSendMode('schedule');
   }, [searchParams]);
 
   const characterCount = content.length;
@@ -75,7 +77,7 @@ export default function NewMessagePage() {
     setSendMode('now');
   }
 
-  async function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
     const token = getToken();
@@ -135,9 +137,11 @@ export default function NewMessagePage() {
       console.error('Failed to submit message', error);
 
       toast.error(
-        sendMode === 'schedule'
-          ? 'Failed to schedule message'
-          : 'Failed to send message',
+        error instanceof Error
+          ? error.message
+          : sendMode === 'schedule'
+            ? 'Failed to schedule message'
+            : 'Failed to send message',
       );
     } finally {
       setLoading(false);
@@ -146,22 +150,22 @@ export default function NewMessagePage() {
 
   return (
     <div className={ui.page}>
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-6">
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="border-b border-slate-100 px-6 py-5 bg-gradient-to-r from-slate-950 to-slate-800 text-white">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-              <div>
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 bg-gradient-to-r from-slate-950 to-slate-800 px-4 py-5 text-white sm:px-6">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div className="min-w-0">
                 <h2 className="text-2xl font-bold">New Message</h2>
-                <p className="text-sm text-slate-300 mt-1">
+                <p className="mt-1 text-sm leading-6 text-slate-300">
                   Send now or schedule an SMS for later delivery.
                 </p>
               </div>
 
-              <div className="inline-flex rounded-xl bg-white/10 p-1 border border-white/10">
+              <div className="grid w-full grid-cols-2 rounded-xl border border-white/10 bg-white/10 p-1 sm:inline-grid sm:w-auto">
                 <button
                   type="button"
                   onClick={() => setSendMode('now')}
-                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
                     sendMode === 'now'
                       ? 'bg-white text-slate-950 shadow-sm'
                       : 'text-slate-200 hover:bg-white/10'
@@ -173,7 +177,7 @@ export default function NewMessagePage() {
                 <button
                   type="button"
                   onClick={() => setSendMode('schedule')}
-                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
                     sendMode === 'schedule'
                       ? 'bg-white text-slate-950 shadow-sm'
                       : 'text-slate-200 hover:bg-white/10'
@@ -185,7 +189,7 @@ export default function NewMessagePage() {
             </div>
           </div>
 
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-1.5">
                 <label className={ui.label}>Recipient Phone Number</label>
@@ -196,14 +200,14 @@ export default function NewMessagePage() {
                   placeholder="+2519XXXXXXXX or 09XXXXXXXX"
                   className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
                 />
-                <p className="text-xs text-slate-400">
+                <p className="text-xs leading-5 text-slate-400">
                   Ethiopian local numbers will be normalized automatically by
                   the backend.
                 </p>
               </div>
 
               <div className="space-y-1.5">
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                   <label className={ui.label}>Message</label>
                   <span className="text-xs text-slate-400">
                     {characterCount}/1600 · {estimatedSegments} segment
@@ -222,17 +226,17 @@ export default function NewMessagePage() {
 
               {sendMode === 'schedule' ? (
                 <div className="rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
-                  <div className="flex items-start gap-3">
-                    <div className="h-10 w-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
                       ⏰
                     </div>
 
-                    <div className="flex-1 space-y-3">
+                    <div className="min-w-0 flex-1 space-y-3">
                       <div>
                         <p className="font-semibold text-slate-900">
                           Schedule delivery
                         </p>
-                        <p className="text-sm text-slate-500 mt-0.5">
+                        <p className="mt-0.5 text-sm leading-6 text-slate-500">
                           Choose when this SMS should be queued for sending.
                         </p>
                       </div>
@@ -246,7 +250,7 @@ export default function NewMessagePage() {
                       />
 
                       {scheduledAt ? (
-                        <p className="text-xs text-blue-700">
+                        <p className="break-words text-xs leading-5 text-blue-700">
                           This message will be scheduled for{' '}
                           {new Date(scheduledAt).toLocaleString()}.
                         </p>
@@ -256,11 +260,11 @@ export default function NewMessagePage() {
                 </div>
               ) : null}
 
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-2">
+              <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center">
                 <button
                   type="submit"
                   disabled={loading}
-                  className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 hover:shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
                   {submitButtonText}
                 </button>
@@ -269,7 +273,7 @@ export default function NewMessagePage() {
                   type="button"
                   onClick={resetForm}
                   disabled={loading}
-                  className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                  className="inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 sm:w-auto"
                 >
                   Clear
                 </button>
@@ -280,35 +284,33 @@ export default function NewMessagePage() {
 
         <aside className="space-y-4">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-bold text-slate-900">
-              Message Summary
-            </p>
+            <p className="text-sm font-bold text-slate-900">Message Summary</p>
 
             <div className="mt-4 space-y-3 text-sm">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3">
                 <span className="text-slate-500">Mode</span>
                 <span className="font-semibold text-slate-900">
                   {sendMode === 'schedule' ? 'Scheduled' : 'Immediate'}
                 </span>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3">
                 <span className="text-slate-500">Characters</span>
                 <span className="font-semibold text-slate-900">
                   {characterCount}
                 </span>
               </div>
 
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3">
                 <span className="text-slate-500">Estimated segments</span>
                 <span className="font-semibold text-slate-900">
                   {estimatedSegments}
                 </span>
               </div>
 
-              <div className="flex items-center justify-between">
-                <span className="text-slate-500">Recipient</span>
-                <span className="font-semibold text-slate-900 truncate max-w-40">
+              <div className="flex items-center justify-between gap-3">
+                <span className="shrink-0 text-slate-500">Recipient</span>
+                <span className="min-w-0 truncate text-right font-semibold text-slate-900">
                   {recipient || 'Not set'}
                 </span>
               </div>
@@ -319,7 +321,7 @@ export default function NewMessagePage() {
             <p className="text-sm font-bold text-emerald-900">
               Scheduling behavior
             </p>
-            <p className="text-sm text-emerald-700 mt-2 leading-6">
+            <p className="mt-2 text-sm leading-6 text-emerald-700">
               Scheduled messages remain in the scheduled list until their time
               arrives. You can cancel them before execution.
             </p>
@@ -332,7 +334,7 @@ export default function NewMessagePage() {
             <p className="text-sm font-bold text-blue-900">
               Manage scheduled messages
             </p>
-            <p className="text-sm text-blue-700 mt-2 leading-6">
+            <p className="mt-2 text-sm leading-6 text-blue-700">
               View pending scheduled SMS messages and cancel them before
               execution.
             </p>
@@ -340,7 +342,7 @@ export default function NewMessagePage() {
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <p className="text-sm font-bold text-slate-900">Delivery status</p>
-            <p className="text-sm text-slate-500 mt-2 leading-6">
+            <p className="mt-2 text-sm leading-6 text-slate-500">
               Messages move to <span className="font-semibold">sent</span> when
               accepted by the gateway. They become{' '}
               <span className="font-semibold">delivered</span> only after a DLR
