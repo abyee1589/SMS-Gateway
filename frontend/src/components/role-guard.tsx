@@ -18,19 +18,22 @@ export default function RoleGuard({
 }: RoleGuardProps) {
   const router = useRouter();
 
+  const normalizedRole = currentUserRole?.toLowerCase() as UserRole | undefined;
+  const hasAccess = normalizedRole ? allowedRoles.includes(normalizedRole) : false;
+
   useEffect(() => {
     if (!currentUserRole) return;
 
-    if (!allowedRoles.includes(currentUserRole as UserRole)) {
-      router.push('/');
+    if (!hasAccess) {
+      router.push('/dashboard');
     }
-  }, [currentUserRole, allowedRoles, router]);
+  }, [currentUserRole, hasAccess, router]);
 
   if (!currentUserRole) {
     return null;
   }
 
-  if (!allowedRoles.includes(currentUserRole as UserRole)) {
+  if (!hasAccess) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
         You do not have access to this page.
