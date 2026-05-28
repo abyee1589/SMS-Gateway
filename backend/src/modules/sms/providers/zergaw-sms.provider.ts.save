@@ -14,7 +14,6 @@ export class ZergawSmsProvider implements SmsGatewayProvider {
     const url = this.configService.get<string>('ZERGAW_SMS_URL');
     const username = this.configService.get<string>('ZERGAW_SMS_USERNAME');
     const password = this.configService.get<string>('ZERGAW_SMS_PASSWORD');
-    const sender = this.configService.get<string>('ZERGAW_SMS_FROM') || '9892';
 
     if (!url || !username || !password) {
       return {
@@ -31,20 +30,10 @@ export class ZergawSmsProvider implements SmsGatewayProvider {
         username,
         password,
         to: input.recipient.replace(/^\+/, ''),
-        from: sender,
         content: input.content,
       });
 
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
-
-      const response = await fetch(`${url}?${params.toString()}`, {
-        method: 'GET',
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeout);
-
+      const response = await fetch(`${url}?${params.toString()}`);
       const text = await response.text();
       const lower = text.toLowerCase();
 
@@ -84,11 +73,11 @@ export class ZergawSmsProvider implements SmsGatewayProvider {
         const providerMessageId = match?.[1];
 
         return {
-          normalizedStatus: 'sent',
-          rawStatus: text,
-          providerMessageId,
-          acceptedAt: new Date(),
-          raw: text,
+            normalizedStatus: 'sent',
+            rawStatus: text,
+            providerMessageId,
+            acceptedAt: new Date(),
+            raw: text,
         };
       }
 
@@ -106,12 +95,12 @@ export class ZergawSmsProvider implements SmsGatewayProvider {
         rawStatus: 'network_error',
         errorCode: 'ZERGAW_NETWORK_ERROR',
         errorMessage:
-          error instanceof Error
-            ? error.message
-            : 'Failed to call Zergaw gateway',
+          error instanceof Error ? error.message : 'Failed to call Zergaw gateway',
         failureType: 'temporary',
         raw: error,
       };
     }
   }
 }
+\q
+
