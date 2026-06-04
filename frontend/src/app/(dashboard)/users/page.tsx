@@ -19,16 +19,42 @@ type User = {
   updatedAt: string;
 };
 
+type CreateUserRole = 'admin' | 'user';
+
+function getErrorMessage(error: unknown) {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error
+  ) {
+    const message = (error as { message?: unknown }).message;
+
+    if (Array.isArray(message)) return message[0] ?? 'Request failed';
+    if (typeof message === 'string') return message;
+  }
+
+  if (error instanceof Error) return error.message;
+
+  return 'Request failed';
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<UserRole>('user');
+  const [role, setRole] = useState<CreateUserRole>('user');
+
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+
+  const isSuperAdmin = currentUser?.role === 'super_admin';
+  const isCompanyAdmin = currentUser?.role === 'admin';
 
   async function loadUsers() {
     const token = getToken();
@@ -40,11 +66,12 @@ export default function UsersPage() {
 
     try {
       setError('');
-      const data = await apiFetch<User[]>('/users', undefined, token);
-      setUsers(data);
+
+      const usersData = await apiFetch<User[]>('/users', undefined, token);
+      setUsers(usersData);
     } catch (error) {
-      console.error('Failed to load users', error);
-      setError(error instanceof Error ? error.message : 'Failed to load users');
+      console.error('Failed to load users page', error);
+      setError(getErrorMessage(error));
     } finally {
       setPageLoading(false);
     }
@@ -76,6 +103,12 @@ export default function UsersPage() {
       return;
     }
 
+    if (password.trim().length < 8) {
+      setError('Temporary password must be at least 8 characters');
+      setSuccess('');
+      return;
+    }
+
     setLoading(true);
     setError('');
     setSuccess('');
@@ -98,17 +131,18 @@ export default function UsersPage() {
       setPassword('');
       setRole('user');
       setSuccess('User created successfully');
+      toast.success('User created successfully');
       await loadUsers();
     } catch (error) {
       console.error('Failed to create user', error);
-      setError(error instanceof Error ? error.message : 'Failed to create user');
+      setError(getErrorMessage(error));
       setSuccess('');
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleRoleChange(userId: string, newRole: UserRole) {
+  async function handleRoleChange(userId: string, newRole: CreateUserRole) {
     const token = getToken();
 
     if (!token) {
@@ -116,6 +150,7 @@ export default function UsersPage() {
       return;
     }
 
+    setActionLoadingId(userId);
     setError('');
     setSuccess('');
 
@@ -130,13 +165,14 @@ export default function UsersPage() {
       );
 
       setSuccess('User role updated');
+      toast.success('User role updated');
       await loadUsers();
     } catch (error) {
       console.error('Failed to update role', error);
-      setError(
-        error instanceof Error ? error.message : 'Failed to update user role',
-      );
+      setError(getErrorMessage(error));
       setSuccess('');
+    } finally {
+      setActionLoadingId(null);
     }
   }
 
@@ -148,6 +184,7 @@ export default function UsersPage() {
       return;
     }
 
+    setActionLoadingId(userId);
     setError('');
     setSuccess('');
 
@@ -164,13 +201,14 @@ export default function UsersPage() {
       toast.success(
         `User ${isActive ? 'deactivated' : 'activated'} successfully`,
       );
+
       await loadUsers();
     } catch (error) {
       console.error('Failed to update status', error);
-      setError(
-        error instanceof Error ? error.message : 'Failed to update user status',
-      );
+      setError(getErrorMessage(error));
       setSuccess('');
+    } finally {
+      setActionLoadingId(null);
     }
   }
 
@@ -196,78 +234,94 @@ export default function UsersPage() {
   return (
     <RoleGuard
       currentUserRole={currentUser?.role}
-      allowedRoles={['super_admin']}
+      allowedRoles={['super_admin', 'admin']}
     >
       <div className={ui.page}>
         {error ? <div className={ui.alertError}>{error}</div> : null}
         {success ? <div className={ui.alertSuccess}>{success}</div> : null}
 
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 bg-gradient-to-r from-slate-950 to-slate-800 px-4 py-5 text-white sm:px-6">
-            <h2 className="text-2xl font-bold">User Management</h2>
-            <p className="mt-1 text-sm leading-6 text-slate-300">
-              Create users, assign roles, and manage account access.
+        {isCompanyAdmin ? (
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-100 bg-gradient-to-r from-slate-950 to-slate-800 px-4 py-5 text-white sm:px-6">
+              <h2 className="text-2xl font-bold">User Management</h2>
+              <p className="mt-1 text-sm leading-6 text-slate-300">
+                Create company admins and users inside your own company.
+              </p>
+            </div>
+
+            <div className="p-4 sm:p-6">
+              <form
+                onSubmit={handleCreateUser}
+                className="grid grid-cols-1 gap-4 lg:grid-cols-3"
+              >
+                <div className="space-y-1.5">
+                  <label className={ui.label}>Email</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
+                    placeholder="user@company.com"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className={ui.label}>Temporary Password</label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
+                    placeholder="At least 8 characters"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className={ui.label}>Role</label>
+                  <select
+                    value={role}
+                    onChange={(e) =>
+                      setRole(e.target.value as CreateUserRole)
+                    }
+                    className={`${ui.select} transition focus:ring-4 focus:ring-blue-100`}
+                  >
+                    <option value="user">User</option>
+                    <option value="admin">Company Admin</option>
+                  </select>
+                </div>
+
+                <div className="lg:col-span-3">
+                  <button
+                    type="submit"
+                    disabled={loading || pageLoading}
+                    className={`${ui.primaryButton} w-full justify-center sm:w-auto`}
+                  >
+                    {loading ? 'Creating...' : 'Create User'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        ) : null}
+
+        {isSuperAdmin ? (
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4 text-blue-800">
+            <p className="font-black">Platform user overview</p>
+            <p className="mt-1 text-sm leading-6">
+              Super admins can review platform users here. Company creation and
+              first company admin setup should be handled from the Companies
+              page.
             </p>
           </div>
-
-          <div className="p-4 sm:p-6">
-            <form
-              onSubmit={handleCreateUser}
-              className="grid grid-cols-1 gap-4 lg:grid-cols-3"
-            >
-              <div className="space-y-1.5">
-                <label className={ui.label}>Email</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
-                  placeholder="user@example.com"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className={ui.label}>Temporary Password</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
-                  placeholder="At least 8 characters"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className={ui.label}>Role</label>
-                <select
-                  value={role}
-                  onChange={(e) => setRole(e.target.value as UserRole)}
-                  className={`${ui.select} transition focus:ring-4 focus:ring-blue-100`}
-                >
-                  <option value="user">User</option>
-                  <option value="admin">Admin</option>
-                  <option value="super_admin">Super Admin</option>
-                </select>
-              </div>
-
-              <div className="lg:col-span-3">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className={`${ui.primaryButton} w-full justify-center sm:w-auto`}
-                >
-                  {loading ? 'Creating...' : 'Create User'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        ) : null}
 
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-100 px-4 py-5 sm:px-6">
             <h2 className={ui.sectionTitle}>Users</h2>
             <p className={ui.sectionSubtitle}>
-              Manage roles and account status for your tenant.
+              {isSuperAdmin
+                ? 'Review users across companies.'
+                : 'Manage admins and users inside your company.'}
             </p>
           </div>
 
@@ -282,75 +336,114 @@ export default function UsersPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {users.map((user) => (
-                  <div
-                    key={user.id}
-                    className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
-                  >
-                    <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                      <div className="min-w-0">
-                        <p className="break-words font-semibold text-gray-900">
-                          {user.email}
-                        </p>
+                {users.map((user) => {
+                  const targetIsSuperAdmin = user.role === 'super_admin';
+                  const isSelf = user.id === currentUser?.id;
 
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <span
-                            className={`inline-flex h-7 min-w-24 items-center justify-center rounded-full px-2.5 text-xs font-bold ${getRoleBadgeClass(
-                              user.role,
-                            )}`}
-                          >
-                            {formatRole(user.role)}
-                          </span>
+                  const canEditRole =
+                    !targetIsSuperAdmin &&
+                    !isSelf &&
+                    (isCompanyAdmin || isSuperAdmin);
 
-                          <span
-                            className={`inline-flex h-7 min-w-20 items-center justify-center rounded-full px-2.5 text-xs font-bold ${
-                              user.isActive
-                                ? 'bg-green-100 text-green-700'
-                                : 'bg-red-100 text-red-700'
-                            }`}
-                          >
-                            {user.isActive ? 'Active' : 'Inactive'}
-                          </span>
+                  const canToggleStatus =
+                    !isSelf && (isCompanyAdmin || isSuperAdmin);
+
+                  return (
+                    <div
+                      key={user.id}
+                      className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+                    >
+                      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                        <div className="min-w-0">
+                          <p className="break-words font-semibold text-gray-900">
+                            {user.email}
+                          </p>
+
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <span
+                              className={`inline-flex h-7 min-w-24 items-center justify-center rounded-full px-2.5 text-xs font-bold ${getRoleBadgeClass(
+                                user.role,
+                              )}`}
+                            >
+                              {formatRole(user.role)}
+                            </span>
+
+                            <span
+                              className={`inline-flex h-7 min-w-20 items-center justify-center rounded-full px-2.5 text-xs font-bold ${
+                                user.isActive
+                                  ? 'bg-green-100 text-green-700'
+                                  : 'bg-red-100 text-red-700'
+                              }`}
+                            >
+                              {user.isActive ? 'Active' : 'Inactive'}
+                            </span>
+
+                            {isSelf ? (
+                              <span className="inline-flex h-7 items-center justify-center rounded-full bg-blue-50 px-2.5 text-xs font-bold text-blue-700">
+                                You
+                              </span>
+                            ) : null}
+
+                            {isSuperAdmin ? (
+                              <span className="inline-flex h-7 items-center justify-center rounded-full bg-slate-100 px-2.5 text-xs font-bold text-slate-600">
+                                {user.tenantId}
+                              </span>
+                            ) : null}
+                          </div>
+
+                          <p className="mt-3 text-xs leading-5 text-gray-400">
+                            Created:{' '}
+                            {new Date(user.createdAt).toLocaleString()}
+                          </p>
                         </div>
 
-                        <p className="mt-3 text-xs leading-5 text-gray-400">
-                          Created: {new Date(user.createdAt).toLocaleString()}
-                        </p>
-                      </div>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,220px)_auto] sm:items-center">
+                          <select
+                            value={
+                              user.role === 'admin' || user.role === 'user'
+                                ? user.role
+                                : 'admin'
+                            }
+                            onChange={(e) =>
+                              handleRoleChange(
+                                user.id,
+                                e.target.value as CreateUserRole,
+                              )
+                            }
+                            disabled={
+                              !canEditRole || actionLoadingId === user.id
+                            }
+                            className={`${ui.select} w-full disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
+                          >
+                            <option value="user">User</option>
+                            <option value="admin">Company Admin</option>
+                          </select>
 
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,220px)_auto] sm:items-center">
-                        <select
-                          value={user.role}
-                          onChange={(e) =>
-                            handleRoleChange(
-                              user.id,
-                              e.target.value as UserRole,
-                            )
-                          }
-                          className={`${ui.select} w-full`}
-                        >
-                          <option value="user">User</option>
-                          <option value="admin">Admin</option>
-                          <option value="super_admin">Super Admin</option>
-                        </select>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleStatusToggle(user.id, user.isActive)
-                          }
-                          className={`inline-flex w-full items-center justify-center rounded-xl px-4 py-3 text-sm font-bold transition sm:w-32 ${
-                            user.isActive
-                              ? 'bg-red-600 text-white hover:bg-red-700'
-                              : 'bg-blue-600 text-white hover:bg-blue-700'
-                          }`}
-                        >
-                          {user.isActive ? 'Deactivate' : 'Activate'}
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleStatusToggle(user.id, user.isActive)
+                            }
+                            disabled={
+                              !canToggleStatus || actionLoadingId === user.id
+                            }
+                            className={`inline-flex w-full items-center justify-center rounded-xl px-4 py-3 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-60 sm:w-32 ${
+                              user.isActive
+                                ? 'bg-red-600 text-white hover:bg-red-700'
+                                : 'bg-blue-600 text-white hover:bg-blue-700'
+                            }`}
+                          >
+                            {actionLoadingId === user.id
+                              ? 'Saving...'
+                              : user.isActive
+                                ? 'Deactivate'
+                                : 'Activate'}
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

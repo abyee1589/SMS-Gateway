@@ -15,6 +15,7 @@ import { getAllowedRolesForPath, canAccess, navItems } from '@/lib/access';
 import {
   IconAddressBook,
   IconBellRinging,
+  IconBuildingSkyscraper,
   IconClipboardList,
   IconDashboard,
   IconMenu2,
@@ -23,7 +24,10 @@ import {
   IconUsers,
   IconUsersGroup,
   IconX,
+  IconCreditCard,
+  IconPackages,
 } from '@tabler/icons-react';
+
 
 type CurrentUser = {
   id: string;
@@ -40,12 +44,15 @@ type SidebarIcon = ComponentType<{
 const sidebarIcons: Record<string, SidebarIcon> = {
   '/': IconDashboard,
   '/dashboard': IconDashboard,
+  '/tenants': IconBuildingSkyscraper,
   '/messages': IconMessage2,
   '/contacts': IconAddressBook,
   '/campaigns': IconSpeakerphone,
   '/contact-groups': IconUsersGroup,
   '/users': IconUsers,
   '/audit-logs': IconClipboardList,
+  '/billing': IconCreditCard,
+  '/subscription-plans': IconPackages,
 };
 
 function getSidebarIcon(href: string) {

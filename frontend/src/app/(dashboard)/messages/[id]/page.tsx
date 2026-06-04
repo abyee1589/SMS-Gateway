@@ -120,7 +120,7 @@ export default function MessageDetailPage() {
           : 'Message sent again successfully',
       );
 
-      router.push('/messages/sent');
+      router.push('/messages/outbound');
     } catch (error) {
       console.error(error);
       toast.error(
@@ -136,7 +136,7 @@ export default function MessageDetailPage() {
     }
   }
 
-  function handleResend(e: React.FormEvent<HTMLFormElement>) {
+  function handleResend(e: React.SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     submitMessage(false);
   }
@@ -176,7 +176,7 @@ export default function MessageDetailPage() {
           </div>
 
           <Link
-            href="/messages/sent"
+            href="/messages/outbound"
             className={`${ui.secondaryButton} w-full justify-center sm:w-auto`}
           >
             Back to Messages

@@ -63,7 +63,6 @@ export class SmsProcessor extends WorkerHost {
       await this.smsRepository.update(messageId, {
         status: MessageStatus.PROCESSING,
       });
-      await this.tenantsService.assertCanSendMessages(message.tenantId, 1);
 
       const provider = this.smsProviderFactory.getProvider();
       const providerName = this.smsProviderFactory.getProviderName();
@@ -168,7 +167,12 @@ export class SmsProcessor extends WorkerHost {
       });
 
       if (latestBeforeSuccess?.status !== MessageStatus.SENT) {
-        await this.tenantsService.incrementSmsUsage(message.tenantId, 1);
+        await this.tenantsService.incrementSmsUsage(
+          message.tenantId,
+          1,
+          messageId,
+          message.createdByUserId,
+        );
       }
 
       this.logger.log(

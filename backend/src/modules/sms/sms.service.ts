@@ -28,6 +28,17 @@ type CurrentUser = {
   role: string;
 };
 
+type TenantMessagePriority = 'normal' | 'high' | 'critical';
+
+function getBullMqPriority(priority?: string) {
+  const normalized = (priority ?? 'normal') as TenantMessagePriority;
+
+  if (normalized === 'critical') return 1;
+  if (normalized === 'high') return 5;
+
+  return 10;
+}
+
 @Injectable()
 export class SmsService {
   private readonly logger = new Logger(SmsService.name);
@@ -96,7 +107,12 @@ export class SmsService {
     }
   }
 
-  await this.tenantsService.assertCanSendMessages(currentUser.tenantId, 1);
+  const tenantUsage = await this.tenantsService.assertCanSendMessages(
+    currentUser.tenantId,
+    1,
+  );
+
+  const queuePriority = getBullMqPriority(tenantUsage.messagePriority);
 
   const message = this.smsRepository.create({
     recipient,
@@ -118,6 +134,8 @@ export class SmsService {
       forceSend,
       scheduledAt: isScheduled ? scheduledDate?.toISOString() : null,
       idempotencyKey,
+      tenantPriority: tenantUsage.messagePriority,
+      queuePriority,
     }),
   );
 
@@ -133,6 +151,7 @@ export class SmsService {
     },
     {
       delay: isScheduled ? Math.max(0, scheduledDate!.getTime() - Date.now()) : 0,
+      priority: queuePriority,
       attempts: SMS_MAX_RETRIES,
       backoff: {
         type: 'exponential',
@@ -199,7 +218,12 @@ export class SmsService {
 
     const content = dto?.content?.trim() || message.content;
 
-    await this.tenantsService.assertCanSendMessages(message.tenantId, 1);
+    const tenantUsage = await this.tenantsService.assertCanSendMessages(
+      message.tenantId,
+      1,
+    );
+
+    const queuePriority = getBullMqPriority(tenantUsage.messagePriority);
 
     const idempotencyKey = this.buildIdempotencyKey(
       message.tenantId,
@@ -228,6 +252,8 @@ export class SmsService {
     recipient,
     content,
     idempotencyKey,
+    tenantPriority: tenantUsage.messagePriority,
+    queuePriority,
   }),
 );
 
@@ -242,6 +268,7 @@ export class SmsService {
         idempotencyKey,
       },
       {
+        priority: queuePriority,
         attempts: SMS_MAX_RETRIES,
         backoff: {
           type: 'exponential',

@@ -19,6 +19,7 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { HealthModule } from './modules/health/health.module';
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware';
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware';
+import { SubscriptionPlansModule } from './modules/subscription-plans/subscription-plans.module';
 
 @Module({
   imports: [
@@ -62,7 +63,8 @@ import { RequestLoggerMiddleware } from './common/middleware/request-logger.midd
     CampaignsModule,
     ContactGroupsModule,
     AuditLogsModule,
-    HealthModule
+    HealthModule,
+    SubscriptionPlansModule,
   ],
 })
 export class AppModule implements NestModule {

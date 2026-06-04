@@ -1,9 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, Repository } from 'typeorm';
+import { Between, In, Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { SmsMessage, MessageStatus } from '../sms/entities/sms.entity';
-import { Tenant } from '../tenants/entities/tenant.entity';
+import {
+  CommercialTier,
+  Tenant,
+  TenantStatus,
+} from '../tenants/entities/tenant.entity';
 
 type CurrentUser = {
   id: string;
@@ -30,11 +34,18 @@ export class DashboardService {
     currentUser: CurrentUser,
     period: DashboardPeriod = 'month',
   ) {
-    const { tenantId } = currentUser;
+    const dateRange = this.getDateRange(period);
 
+    if (currentUser.role === 'super_admin') {
+      return this.getPlatformStats(currentUser, period, dateRange);
+    }
+
+    return this.getTenantStats(currentUser, period, dateRange);
+  }
+
+  private getDateRange(period: DashboardPeriod) {
     const now = new Date();
     const endDate = new Date();
-
     const startDate = new Date();
 
     if (period === 'today') {
@@ -52,6 +63,226 @@ export class DashboardService {
     if (period === 'year') {
       startDate.setFullYear(now.getFullYear() - 1);
     }
+
+    return { startDate, endDate };
+  }
+
+  private async getPlatformStats(
+    currentUser: CurrentUser,
+    period: DashboardPeriod,
+    dateRange: { startDate: Date; endDate: Date },
+  ) {
+    const { startDate, endDate } = dateRange;
+
+    const messageWhere = {
+      createdAt: Between(startDate, endDate),
+    };
+
+    const [
+      tenants,
+      totalUsers,
+      activeUsers,
+      totalMessages,
+      sentMessages,
+      deliveredMessages,
+      queuedMessages,
+      failedMessages,
+      deadLetterMessages,
+      recentMessages,
+    ] = await Promise.all([
+      this.tenantsRepository.find({
+        order: { createdAt: 'DESC' },
+      }),
+
+      this.usersRepository.count(),
+
+      this.usersRepository.count({
+        where: { isActive: true },
+      }),
+
+      this.messagesRepository.count({
+        where: messageWhere,
+      }),
+
+      this.messagesRepository.count({
+        where: {
+          ...messageWhere,
+          status: MessageStatus.SENT,
+        },
+      }),
+
+      this.messagesRepository.count({
+        where: {
+          ...messageWhere,
+          status: MessageStatus.DELIVERED,
+        },
+      }),
+
+      this.messagesRepository.count({
+        where: {
+          ...messageWhere,
+          status: MessageStatus.QUEUED,
+        },
+      }),
+
+      this.messagesRepository.count({
+        where: {
+          ...messageWhere,
+          status: MessageStatus.FAILED,
+        },
+      }),
+
+      this.messagesRepository.count({
+        where: {
+          ...messageWhere,
+          status: MessageStatus.DEAD_LETTER,
+        },
+      }),
+
+      this.messagesRepository.find({
+        where: messageWhere,
+        order: { createdAt: 'DESC' },
+        take: 8,
+      }),
+    ]);
+
+    const totalCompanies = tenants.length;
+    const activeCompanies = tenants.filter(
+      (tenant) => tenant.status === TenantStatus.ACTIVE,
+    ).length;
+
+    const vipCompanies = tenants.filter((tenant) =>
+      [CommercialTier.VIP, CommercialTier.ENTERPRISE].includes(
+        tenant.commercialTier,
+      ),
+    ).length;
+
+    const totalSmsQuota = tenants.reduce(
+      (sum, tenant) => sum + tenant.smsQuota,
+      0,
+    );
+
+    const totalSmsUsed = tenants.reduce(
+      (sum, tenant) => sum + tenant.smsUsed,
+      0,
+    );
+
+    const totalRemainingSms = Math.max(0, totalSmsQuota - totalSmsUsed);
+
+    const usagePercent =
+      totalSmsQuota > 0
+        ? Number(((totalSmsUsed / totalSmsQuota) * 100).toFixed(1))
+        : 0;
+
+    const deliveryRate =
+      totalMessages > 0
+        ? Number(((deliveredMessages / totalMessages) * 100).toFixed(1))
+        : 0;
+
+    const companiesNearQuotaLimit = tenants
+      .map((tenant) => {
+        const remainingSms = Math.max(0, tenant.smsQuota - tenant.smsUsed);
+        const usagePercent =
+          tenant.smsQuota > 0
+            ? Number(((tenant.smsUsed / tenant.smsQuota) * 100).toFixed(1))
+            : 0;
+
+        return {
+          id: tenant.id,
+          name: tenant.name,
+          status: tenant.status,
+          commercialTier: tenant.commercialTier,
+          messagePriority: tenant.messagePriority,
+          smsQuota: tenant.smsQuota,
+          smsUsed: tenant.smsUsed,
+          remainingSms,
+          usagePercent,
+        };
+      })
+      .filter((tenant) => tenant.usagePercent >= 70)
+      .sort((a, b) => b.usagePercent - a.usagePercent)
+      .slice(0, 10);
+
+    const topCompaniesByUsage = tenants
+      .map((tenant) => ({
+        id: tenant.id,
+        name: tenant.name,
+        status: tenant.status,
+        commercialTier: tenant.commercialTier,
+        messagePriority: tenant.messagePriority,
+        smsQuota: tenant.smsQuota,
+        smsUsed: tenant.smsUsed,
+        remainingSms: Math.max(0, tenant.smsQuota - tenant.smsUsed),
+        usagePercent:
+          tenant.smsQuota > 0
+            ? Number(((tenant.smsUsed / tenant.smsQuota) * 100).toFixed(1))
+            : 0,
+      }))
+      .sort((a, b) => b.smsUsed - a.smsUsed)
+      .slice(0, 10);
+
+    return {
+      currentUser: {
+        id: currentUser.id,
+        role: currentUser.role,
+        tenantId: currentUser.tenantId,
+      },
+
+      scope: 'platform',
+      period,
+
+      platform: {
+        totalCompanies,
+        activeCompanies,
+        vipCompanies,
+        totalUsers,
+        activeUsers,
+        totalSmsQuota,
+        totalSmsUsed,
+        totalRemainingSms,
+        usagePercent,
+      },
+
+      subscription: {
+        smsQuota: totalSmsQuota,
+        smsUsed: totalSmsUsed,
+        remainingSms: totalRemainingSms,
+        usagePercent,
+        subscriptionStatus: 'platform',
+        subscriptionEndDate: null,
+      },
+
+      overview: {
+        totalUsers,
+        activeUsers,
+        totalCampaigns: 0,
+        totalMessages,
+      },
+
+      traffic: {
+        sentMessages,
+        deliveredMessages,
+        queuedMessages,
+        failedMessages,
+        deadLetterMessages,
+        sentToday: sentMessages,
+        failedToday: failedMessages,
+        deliveryRate,
+      },
+
+      companiesNearQuotaLimit,
+      topCompaniesByUsage,
+      recentMessages,
+    };
+  }
+
+  private async getTenantStats(
+    currentUser: CurrentUser,
+    period: DashboardPeriod,
+    dateRange: { startDate: Date; endDate: Date },
+  ) {
+    const { tenantId } = currentUser;
+    const { startDate, endDate } = dateRange;
 
     const baseMessageWhere =
       currentUser.role === 'user'
@@ -81,7 +312,6 @@ export class DashboardService {
       queuedMessages,
       failedMessages,
       deadLetterMessages,
-      totalCampaigns,
       recentMessages,
     ] = await Promise.all([
       this.usersRepository.count({
@@ -131,9 +361,6 @@ export class DashboardService {
         },
       }),
 
-      // temporary until Campaign repository is injected
-      Promise.resolve(0),
-
       this.messagesRepository.find({
         where: messageWhere,
         order: { createdAt: 'DESC' },
@@ -158,10 +385,23 @@ export class DashboardService {
 
     return {
       currentUser: {
+        id: currentUser.id,
         role: currentUser.role,
+        tenantId: currentUser.tenantId,
       },
 
+      scope: 'tenant',
       period,
+
+      tenant: tenant
+        ? {
+            id: tenant.id,
+            name: tenant.name,
+            status: tenant.status,
+            commercialTier: tenant.commercialTier,
+            messagePriority: tenant.messagePriority,
+          }
+        : null,
 
       subscription: {
         smsQuota,
@@ -175,7 +415,7 @@ export class DashboardService {
       overview: {
         totalUsers: safeTotalUsers,
         activeUsers: safeActiveUsers,
-        totalCampaigns,
+        totalCampaigns: 0,
         totalMessages,
       },
 

@@ -1,5 +1,5 @@
-import MessagesListPage from '@/components/messages/MessagesListPage';
+import { redirect } from 'next/navigation';
 
 export default function MessagesPage() {
-  return <MessagesListPage initialTab="all" />;
+  redirect('/messages/outbound');
 }

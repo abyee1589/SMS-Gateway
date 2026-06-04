@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import toast from 'react-hot-toast';
+
 import { apiFetch } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import { ui } from '@/lib/ui';
-import toast from 'react-hot-toast';
-import { useRouter } from 'next/navigation';
 
 type MessageStatus =
   | 'pending'
@@ -42,45 +43,61 @@ type MessagesResponse = {
   };
 };
 
-export type MessagesTab = 'all' | 'sent' | 'failed' | 'scheduled' | 'cancelled';
+export type MessagesTab =
+  | 'outbound'
+  | 'delivered'
+  | 'failed'
+  | 'scheduled'
+  | 'cancelled';
 
-const tabs: {
+type TabItem = {
   key: MessagesTab;
   label: string;
   description: string;
   href: string;
-}[] = [
+};
+
+const outboundTabs: TabItem[] = [
   {
-    key: 'all',
-    label: 'All',
-    description: 'All SMS activity',
-    href: '/messages',
+    key: 'outbound',
+    label: 'All Outbound',
+    description: 'Queued, processing, sent, and delivered',
+    href: '/messages/outbound',
   },
   {
-    key: 'sent',
-    label: 'Sent',
-    description: 'Accepted or delivered',
-    href: '/messages/sent',
+    key: 'delivered',
+    label: 'Delivered',
+    description: 'Successfully delivered',
+    href: '/messages/outbound/delivered',
   },
   {
     key: 'failed',
     label: 'Failed',
     description: 'Failed and dead-letter',
-    href: '/messages/failed',
+    href: '/messages/outbound/failed',
   },
+];
+
+const scheduledTabs: TabItem[] = [
   {
     key: 'scheduled',
-    label: 'Scheduled',
-    description: 'Waiting to send',
+    label: 'Pending',
+    description: 'Scheduled messages waiting to send',
     href: '/messages/scheduled',
   },
   {
     key: 'cancelled',
     label: 'Cancelled',
-    description: 'Cancelled schedules',
-    href: '/messages/cancelled',
+    description: 'Cancelled scheduled messages',
+    href: '/messages/scheduled/cancelled',
   },
 ];
+
+const actionButtonBase =
+  'inline-flex h-8 w-24 items-center justify-center whitespace-nowrap rounded-lg border px-2 text-[11px] font-bold transition disabled:opacity-60';
+
+const mobileActionButtonBase =
+  'inline-flex h-9 flex-1 items-center justify-center whitespace-nowrap rounded-xl border px-3 text-xs font-bold transition disabled:opacity-60';
 
 function getStatusColor(status: MessageStatus) {
   switch (status) {
@@ -125,12 +142,6 @@ function getApiPathForTab(tab: MessagesTab) {
   return '/messages';
 }
 
-const actionButtonBase =
-  'inline-flex h-8 w-24 items-center justify-center whitespace-nowrap rounded-lg border px-2 text-[11px] font-bold transition disabled:opacity-60';
-
-const mobileActionButtonBase =
-  'inline-flex h-9 flex-1 items-center justify-center whitespace-nowrap rounded-xl border px-3 text-xs font-bold transition disabled:opacity-60';
-
 export default function MessagesListPage({
   initialTab,
 }: {
@@ -144,17 +155,41 @@ export default function MessagesListPage({
   const [error, setError] = useState('');
   const [retryConfirmId, setRetryConfirmId] = useState<string | null>(null);
 
+  const isScheduledSection =
+    initialTab === 'scheduled' || initialTab === 'cancelled';
+
+  const visibleTabs = isScheduledSection ? scheduledTabs : outboundTabs;
+
+  const showScheduledAt = isScheduledSection;
+
+  const showSentAt =
+    initialTab === 'outbound' ||
+    initialTab === 'delivered' ||
+    initialTab === 'failed';
+
   const visibleMessages = useMemo(() => {
-    if (initialTab === 'sent') {
+    if (initialTab === 'outbound') {
       return messages.filter((message) =>
-        ['sent', 'delivered'].includes(message.status),
+        ['queued', 'processing', 'sent', 'delivered'].includes(message.status),
       );
+    }
+
+    if (initialTab === 'delivered') {
+      return messages.filter((message) => message.status === 'delivered');
     }
 
     if (initialTab === 'failed') {
       return messages.filter((message) =>
         ['failed', 'dead_letter'].includes(message.status),
       );
+    }
+
+    if (initialTab === 'scheduled') {
+      return messages.filter((message) => message.status === 'scheduled');
+    }
+
+    if (initialTab === 'cancelled') {
+      return messages.filter((message) => message.status === 'cancelled');
     }
 
     return messages;
@@ -335,10 +370,14 @@ export default function MessagesListPage({
         <div className="border-b border-slate-100 bg-gradient-to-r from-slate-950 to-slate-800 px-4 py-5 text-white sm:px-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
-              <h2 className="text-2xl font-bold">Messages</h2>
+              <h2 className="text-2xl font-bold">
+                {isScheduledSection ? 'Scheduled Messages' : 'Outbound Messages'}
+              </h2>
+
               <p className="mt-1 text-sm leading-6 text-slate-300">
-                Monitor scheduled, sent, delivered, failed, and cancelled SMS
-                messages.
+                {isScheduledSection
+                  ? 'Manage pending and cancelled scheduled SMS messages.'
+                  : 'Monitor outbound delivery, failed messages, and delivery history.'}
               </p>
             </div>
 
@@ -353,8 +392,14 @@ export default function MessagesListPage({
         </div>
 
         <div className="border-b border-slate-100 bg-slate-50 p-3 sm:p-4">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
-            {tabs.map((tab) => {
+          <div
+            className={`grid gap-2 ${
+              isScheduledSection
+                ? 'grid-cols-2'
+                : 'grid-cols-1 sm:grid-cols-3'
+            }`}
+          >
+            {visibleTabs.map((tab) => {
               const active = initialTab === tab.key;
 
               return (
@@ -374,6 +419,7 @@ export default function MessagesListPage({
                   >
                     {tab.label}
                   </p>
+
                   <p className="mt-1 hidden text-xs text-slate-500 lg:block">
                     {tab.description}
                   </p>
@@ -439,23 +485,27 @@ export default function MessagesListPage({
                     ) : null}
 
                     <div className="mt-4 grid grid-cols-1 gap-2 text-xs text-slate-500">
-                      <div className="flex justify-between gap-3">
-                        <span className="font-semibold text-slate-400">
-                          Scheduled
-                        </span>
-                        <span className="text-right">
-                          {formatDate(message.scheduledAt)}
-                        </span>
-                      </div>
+                      {showScheduledAt ? (
+                        <div className="flex justify-between gap-3">
+                          <span className="font-semibold text-slate-400">
+                            Scheduled
+                          </span>
+                          <span className="text-right">
+                            {formatDate(message.scheduledAt)}
+                          </span>
+                        </div>
+                      ) : null}
 
-                      <div className="flex justify-between gap-3">
-                        <span className="font-semibold text-slate-400">
-                          Sent
-                        </span>
-                        <span className="text-right">
-                          {formatDate(message.sentAt)}
-                        </span>
-                      </div>
+                      {showSentAt ? (
+                        <div className="flex justify-between gap-3">
+                          <span className="font-semibold text-slate-400">
+                            Sent
+                          </span>
+                          <span className="text-right">
+                            {formatDate(message.sentAt)}
+                          </span>
+                        </div>
+                      ) : null}
 
                       {message.deliveredAt ? (
                         <div className="flex justify-between gap-3">
@@ -484,9 +534,17 @@ export default function MessagesListPage({
                         <th className="w-32 px-3 py-3">Recipient</th>
                         <th className="px-3 py-3">Content</th>
                         <th className="w-32 px-3 py-3">Status</th>
-                        <th className="w-36 px-3 py-3">Scheduled At</th>
+
+                        {showScheduledAt ? (
+                          <th className="w-36 px-3 py-3">Scheduled At</th>
+                        ) : null}
+
                         <th className="w-36 px-3 py-3">Created</th>
-                        <th className="w-36 px-3 py-3">Sent At</th>
+
+                        {showSentAt ? (
+                          <th className="w-36 px-3 py-3">Sent At</th>
+                        ) : null}
+
                         <th className="w-32 px-3 py-3 text-right">Action</th>
                       </tr>
                     </thead>
@@ -527,17 +585,21 @@ export default function MessagesListPage({
                             </span>
                           </td>
 
-                          <td className="w-36 truncate px-3 py-4 align-top text-xs text-slate-500">
-                            {formatDate(message.scheduledAt)}
-                          </td>
+                          {showScheduledAt ? (
+                            <td className="w-36 truncate px-3 py-4 align-top text-xs text-slate-500">
+                              {formatDate(message.scheduledAt)}
+                            </td>
+                          ) : null}
 
                           <td className="w-36 truncate px-3 py-4 align-top text-xs text-slate-500">
                             {formatDate(message.createdAt)}
                           </td>
 
-                          <td className="w-36 truncate px-3 py-4 align-top text-xs text-slate-500">
-                            {formatDate(message.sentAt)}
-                          </td>
+                          {showSentAt ? (
+                            <td className="w-36 truncate px-3 py-4 align-top text-xs text-slate-500">
+                              {formatDate(message.sentAt)}
+                            </td>
+                          ) : null}
 
                           <td className="w-32 px-3 py-4 text-right align-top">
                             <div className="flex justify-end">

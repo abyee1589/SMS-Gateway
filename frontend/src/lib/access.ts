@@ -15,33 +15,41 @@ export const navItems: NavItem[] = [
   },
 
   {
+    href: '/billing',
+    label: 'Billing',
+    roles: ['super_admin', 'admin'],
+  },
+
+  {
+    href: '/subscription-plans',
+    label: 'Plans',
+    roles: ['super_admin'],
+  },
+
+  {
+    href: '/tenants',
+    label: 'Companies',
+    roles: ['super_admin'],
+  },
+
+  {
     href: '/messages',
     label: 'Messages',
     roles: ['super_admin', 'admin', 'user'],
     children: [
       {
         href: '/messages/new',
-        label: 'New',
+        label: 'New Message',
         roles: ['super_admin', 'admin', 'user'],
       },
       {
-        href: '/messages/sent',
-        label: 'Sent',
-        roles: ['super_admin', 'admin', 'user'],
-      },
-      {
-        href: '/messages/failed',
-        label: 'Failed',
+        href: '/messages/outbound',
+        label: 'Outbound',
         roles: ['super_admin', 'admin', 'user'],
       },
       {
         href: '/messages/scheduled',
         label: 'Scheduled',
-        roles: ['super_admin', 'admin', 'user'],
-      },
-      {
-        href: '/messages/cancelled',
-        label: 'Cancelled',
         roles: ['super_admin', 'admin', 'user'],
       },
     ],
@@ -68,7 +76,7 @@ export const navItems: NavItem[] = [
   {
     href: '/users',
     label: 'Users',
-    roles: ['super_admin'],
+    roles: ['super_admin', 'admin'],
   },
 
   {

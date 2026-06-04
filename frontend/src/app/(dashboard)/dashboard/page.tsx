@@ -14,10 +14,14 @@ import {
   Activity,
   AlertOctagon,
   AlertTriangle,
+  Building2,
   CheckCircle2,
   Clock,
+  Crown,
   Radio,
   Send,
+  ShieldCheck,
+  Users,
   Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -25,15 +29,45 @@ import Link from 'next/link';
 
 type DashboardMessage = {
   id: string;
+  tenantId?: string;
   recipient: string;
   content: string;
   status: string;
+  providerName?: string | null;
+  providerMessageId?: string | null;
   createdAt: string;
+};
+
+type CompanyUsage = {
+  id: string;
+  name: string;
+  status: string;
+  commercialTier: string;
+  messagePriority: string;
+  smsQuota: number;
+  smsUsed: number;
+  remainingSms: number;
+  usagePercent: number;
 };
 
 type DashboardStats = {
   currentUser: {
+    id?: string;
     role: string;
+    tenantId?: string;
+  };
+  scope?: 'tenant' | 'platform';
+  period?: 'today' | 'week' | 'month' | 'year';
+  platform?: {
+    totalCompanies: number;
+    activeCompanies: number;
+    vipCompanies: number;
+    totalUsers: number;
+    activeUsers: number;
+    totalSmsQuota: number;
+    totalSmsUsed: number;
+    totalRemainingSms: number;
+    usagePercent: number;
   };
   subscription: {
     smsQuota: number;
@@ -59,6 +93,8 @@ type DashboardStats = {
     failedToday: number;
     deliveryRate: number;
   };
+  companiesNearQuotaLimit?: CompanyUsage[];
+  topCompaniesByUsage?: CompanyUsage[];
   recentMessages: DashboardMessage[];
 };
 
@@ -70,13 +106,13 @@ const STATUS_COLORS: Record<string, string> = {
   'Dead Letter': '#e11d48',
 };
 
+type DashboardPeriod = 'today' | 'week' | 'month' | 'year';
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'year'>(
-    'year',
-  );
+  const [period, setPeriod] = useState<DashboardPeriod>('year');
 
   async function loadDashboard() {
     const token = getToken();
@@ -88,6 +124,10 @@ export default function DashboardPage() {
 
     try {
       setError('');
+
+      if (!stats) {
+        setLoading(true);
+      }
 
       const data = await apiFetch<DashboardStats>(
         `/dashboard/stats?period=${period}`,
@@ -106,14 +146,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadDashboard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period]);
-
-  const subscription = stats?.subscription;
-  const traffic = stats?.traffic;
-  const usagePercent = subscription?.usagePercent ?? 0;
-  const role = stats?.currentUser?.role;
-  const isUser = role === 'user';
-  const chartKey = `chart-${period}`;
 
   const messageBreakdown = useMemo(() => {
     if (!stats) return [];
@@ -131,23 +165,251 @@ export default function DashboardPage() {
     return <DashboardSkeleton />;
   }
 
-  if (error) {
+  if (error || !stats) {
     return (
       <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-700">
-        {error}
+        {error || 'Failed to load dashboard analytics'}
       </div>
     );
   }
+
+  if (stats.scope === 'platform') {
+    return (
+      <PlatformDashboard
+        stats={stats}
+        period={period}
+        setPeriod={setPeriod}
+        messageBreakdown={messageBreakdown}
+      />
+    );
+  }
+
+  return (
+    <TenantDashboard
+      stats={stats}
+      period={period}
+      setPeriod={setPeriod}
+      messageBreakdown={messageBreakdown}
+    />
+  );
+}
+
+function PlatformDashboard({
+  stats,
+  period,
+  setPeriod,
+  messageBreakdown,
+}: {
+  stats: DashboardStats;
+  period: DashboardPeriod;
+  setPeriod: (period: DashboardPeriod) => void;
+  messageBreakdown: { name: string; value: number }[];
+}) {
+  const platform = stats.platform;
+  const traffic = stats.traffic;
+  const usagePercent = platform?.usagePercent ?? 0;
+
+  const platformTrafficTotal =
+    (traffic?.sentMessages ?? 0) +
+    (traffic?.deliveredMessages ?? 0) +
+    (traffic?.queuedMessages ?? 0) +
+    (traffic?.failedMessages ?? 0) +
+    (traffic?.deadLetterMessages ?? 0);
+
+  return (
+    <div className="space-y-6 sm:space-y-8">
+      <header className="overflow-hidden rounded-[2rem] bg-slate-950 text-white shadow-xl">
+        <div className="relative p-5 sm:p-7 lg:p-8">
+          <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-blue-500/20 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-20 left-1/2 h-60 w-60 rounded-full bg-cyan-400/10 blur-3xl" />
+
+          <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200">
+                <ShieldCheck className="h-3.5 w-3.5 text-blue-300" />
+                NexusMsg Platform Control Center
+              </div>
+
+              <h1 className="mt-5 break-words text-3xl font-black tracking-tight sm:text-4xl lg:text-5xl">
+                {platform?.totalCompanies ?? 0}
+                <span className="ml-2 text-lg font-bold text-slate-300 sm:text-xl">
+                  companies managed
+                </span>
+              </h1>
+
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+                Monitor tenant health, quota allocation, VIP priority handling,
+                and SMS traffic across the full NexusMsg platform.
+              </p>
+            </div>
+
+            <Link
+              href="/tenants"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white px-5 py-3 text-sm font-bold text-slate-950 shadow-sm transition hover:bg-slate-100 sm:w-auto"
+            >
+              <Building2 className="h-4 w-4" />
+              Manage Companies
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <PlatformStatCard
+          title="Total Companies"
+          value={platform?.totalCompanies ?? 0}
+          helper={`${platform?.activeCompanies ?? 0} active companies`}
+          icon={Building2}
+        />
+        <PlatformStatCard
+          title="VIP / Enterprise"
+          value={platform?.vipCompanies ?? 0}
+          helper="Priority commercial accounts"
+          icon={Crown}
+          tone="premium"
+        />
+        <PlatformStatCard
+          title="Quota Allocated"
+          value={platform?.totalSmsQuota ?? 0}
+          helper={`${platform?.totalRemainingSms ?? 0} SMS remaining`}
+          icon={Zap}
+        />
+        <PlatformStatCard
+          title="Platform Users"
+          value={platform?.totalUsers ?? 0}
+          helper={`${platform?.activeUsers ?? 0} active users`}
+          icon={Users}
+        />
+      </section>
+
+      <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_0.9fr]">
+        <div className="overflow-hidden rounded-[1.5rem] border border-slate-100 bg-white p-4 shadow-sm sm:p-6">
+          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-lg font-black text-slate-900">
+                Platform SMS Usage
+              </h3>
+              <p className="text-sm text-slate-500">
+                Total used quota across all companies.
+              </p>
+            </div>
+            <span className="w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
+              {usagePercent}% used
+            </span>
+          </div>
+
+          <div className="rounded-3xl bg-slate-950 p-5 text-white">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
+                  Used / Allocated
+                </p>
+                <p className="mt-2 text-3xl font-black sm:text-4xl">
+                  {platform?.totalSmsUsed ?? 0}
+                  <span className="text-lg text-slate-400">
+                    {' '}
+                    / {platform?.totalSmsQuota ?? 0}
+                  </span>
+                </p>
+              </div>
+              <p className="text-sm text-slate-300">
+                Remaining: {platform?.totalRemainingSms ?? 0}
+              </p>
+            </div>
+
+            <div className="mt-5 h-4 overflow-hidden rounded-full bg-white/15">
+              <div
+                className={`h-full rounded-full transition-all duration-700 ease-out ${getUsageBarColor(
+                  usagePercent,
+                )}`}
+                style={{ width: `${Math.min(usagePercent, 100)}%` }}
+              />
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <MiniMetric label="Messages" value={platformTrafficTotal} />
+            <MiniMetric label="Delivered" value={traffic.deliveredMessages} />
+            <MiniMetric label="Delivery Rate" value={`${traffic.deliveryRate}%`} />
+          </div>
+        </div>
+
+        <TrafficPanel
+          title="Platform SMS Traffic"
+          period={period}
+          setPeriod={setPeriod}
+          traffic={traffic}
+          messageBreakdown={messageBreakdown}
+          compactLinks
+        />
+      </section>
+
+      {(traffic.deadLetterMessages ?? 0) > 0 ? (
+        <AlertCard
+          tone="danger"
+          icon={AlertOctagon}
+          title="Dead-letter messages need attention"
+          description={`${traffic.deadLetterMessages} platform message${
+            traffic.deadLetterMessages > 1 ? 's are' : ' is'
+          } in dead-letter status. Review provider issues and retry delivery.`}
+        />
+      ) : null}
+
+      <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <CompanyListPanel
+          title="Top Companies by Usage"
+          subtitle="Highest SMS consumers across the platform."
+          companies={stats.topCompaniesByUsage ?? []}
+          emptyText="No company usage yet."
+        />
+
+        <CompanyListPanel
+          title="Companies Near Quota Limit"
+          subtitle="Companies at or above 70% quota usage."
+          companies={stats.companiesNearQuotaLimit ?? []}
+          emptyText="No companies near quota exhaustion."
+          highlightRisk
+        />
+      </section>
+
+      <RecentMessagesPanel
+        title="Recent Platform Messages"
+        subtitle="Latest SMS activity across all companies."
+        messages={stats.recentMessages}
+      />
+    </div>
+  );
+}
+
+function TenantDashboard({
+  stats,
+  period,
+  setPeriod,
+  messageBreakdown,
+}: {
+  stats: DashboardStats;
+  period: DashboardPeriod;
+  setPeriod: (period: DashboardPeriod) => void;
+  messageBreakdown: { name: string; value: number }[];
+}) {
+  const subscription = stats.subscription;
+  const traffic = stats.traffic;
+  const usagePercent = subscription?.usagePercent ?? 0;
+  const role = stats.currentUser?.role;
+  const isUser = role === 'user';
 
   return (
     <div className="space-y-6 sm:space-y-8">
       <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div />
 
-        <button className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-lg active:scale-95 sm:w-auto">
+        <Link
+          href="/messages/new"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-lg active:scale-95 sm:w-auto"
+        >
           <Send className="h-4 w-4" />
           New Broadcast
-        </button>
+        </Link>
       </header>
 
       <section className="overflow-hidden rounded-[2rem] bg-slate-950 text-white shadow-xl">
@@ -240,184 +502,333 @@ export default function DashboardPage() {
         />
       ) : null}
 
-      <section>
-        <div className="overflow-hidden rounded-[1.5rem] border border-slate-100 bg-white p-4 shadow-sm transition-all duration-300 hover:shadow-md sm:p-6">
-          <div className="mb-5">
-            <h3 className="text-lg font-black text-slate-900">SMC Traffic</h3>
-          </div>
+      <TrafficPanel
+        title="Company SMS Traffic"
+        period={period}
+        setPeriod={setPeriod}
+        traffic={traffic}
+        messageBreakdown={messageBreakdown}
+      />
 
-          <div className="flex flex-wrap gap-2">
-            {(['today', 'week', 'month', 'year'] as const).map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => setPeriod(item)}
-                className={`rounded-full px-4 py-2 text-xs font-bold capitalize transition ${
-                  period === item
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {item}
-              </button>
-            ))}
-          </div>
-
-          <div className="mx-auto mt-6 grid w-full max-w-[760px] grid-cols-1 gap-6 xl:grid-cols-[220px_minmax(0,1fr)] xl:items-center">
-            <div className="min-w-0 space-y-3">
-              <div className="flex flex-wrap gap-2 xl:max-w-[220px] xl:flex-col">
-                {[
-                  {
-                    label: 'Sent',
-                    val: traffic?.sentMessages,
-                    t: 'sent',
-                    path: 'sent',
-                  },
-                  {
-                    label: 'Delivered',
-                    val: traffic?.deliveredMessages,
-                    t: 'delivered',
-                    path: 'sent',
-                  },
-                  {
-                    label: 'Queued',
-                    val: traffic?.queuedMessages,
-                    t: 'queued',
-                    path: 'sent',
-                  },
-                  {
-                    label: 'Failed',
-                    val: traffic?.failedMessages,
-                    t: 'failed',
-                    path: 'failed',
-                  },
-                  {
-                    label: 'Dead Letter',
-                    val: traffic?.deadLetterMessages,
-                    t: 'dead',
-                    path: 'failed',
-                  },
-                ].map((link) => (
-                  <TrafficLink
-                    key={link.label}
-                    href={`/messages/${link.path}`}
-                    title={link.label}
-                    value={link.val ?? 0}
-                    tone={
-                      link.t as
-                        | 'sent'
-                        | 'delivered'
-                        | 'queued'
-                        | 'failed'
-                        | 'dead'
-                    }
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div className="min-w-0">
-              <div className="mx-auto flex h-[260px] w-full max-w-[280px] items-center justify-center sm:h-[320px] sm:max-w-[360px] xl:h-[360px] xl:max-w-[450px]">
-                {messageBreakdown.length === 0 ? (
-                  <EmptyChart />
-                ) : (
-                  <ResponsiveContainer key={chartKey} width="100%" height="100%">
-                    <PieChart
-                      margin={{ top: 10, right: 10, bottom: 10, left: 10 }}
-                    >
-                      <Pie
-                        data={messageBreakdown}
-                        dataKey="value"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        outerRadius="72%"
-                        label={({ percent }) =>
-                          `${(percent * 100).toFixed(0)}%`
-                        }
-                        isAnimationActive
-                        animationBegin={0}
-                        animationDuration={650}
-                        animationEasing="ease-out"
-                      >
-                        {messageBreakdown.map((entry) => (
-                          <Cell
-                            key={entry.name}
-                            fill={STATUS_COLORS[entry.name] ?? '#64748b'}
-                          />
-                        ))}
-                      </Pie>
-
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="overflow-hidden rounded-[1.5rem] border border-slate-100 bg-white p-4 shadow-sm transition-all duration-300 hover:shadow-md sm:p-6">
-        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <h3 className="text-lg font-black text-slate-900">
-              Recent Messages
-            </h3>
-            <p className="text-sm text-slate-500">
-              Latest SMS activity from this tenant.
-            </p>
-          </div>
-
-          <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">
-            {stats?.recentMessages?.length ?? 0} latest
-          </span>
-        </div>
-
-        {!stats?.recentMessages?.length ? (
-          <div className="rounded-2xl border-2 border-dashed border-slate-100 py-12 text-center text-sm text-slate-400">
-            No recent messages.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {stats.recentMessages.map((message) => (
-              <div
-                key={message.id}
-                className="group rounded-2xl border border-slate-100 bg-white px-4 py-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-100 hover:bg-slate-50 hover:shadow-sm"
-              >
-                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                  <div className="min-w-0">
-                    <p className="break-words font-bold text-slate-900 transition group-hover:text-blue-700">
-                      {message.recipient}
-                    </p>
-                    <p className="mt-1 line-clamp-2 break-words text-sm text-slate-600">
-                      {message.content}
-                    </p>
-                  </div>
-
-                  <span className="shrink-0 text-xs font-medium text-slate-400 md:whitespace-nowrap">
-                    {new Date(message.createdAt).toLocaleString()}
-                  </span>
-                </div>
-
-                <span
-                  className={`mt-3 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold ${getStatusClass(
-                    message.status,
-                  )}`}
-                >
-                  {getStatusIcon(message.status)}
-                  {formatStatus(message.status)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+      <RecentMessagesPanel
+        title="Recent Messages"
+        subtitle="Latest SMS activity from this tenant."
+        messages={stats.recentMessages}
+      />
     </div>
   );
 }
 
-function MetricCard({
+  function TrafficPanel({
+    title,
+    period,
+    setPeriod,
+    traffic,
+    messageBreakdown,
+    compactLinks = false,
+    largerChart = false,
+  }: {
+    title: string;
+    period: DashboardPeriod;
+    setPeriod: (period: DashboardPeriod) => void;
+    traffic: DashboardStats['traffic'];
+    messageBreakdown: { name: string; value: number }[];
+    compactLinks?: boolean;
+    largerChart?: boolean;
+  }) {
+  const trafficLinks = [
+    {
+      label: 'Sent',
+      val: traffic?.sentMessages,
+      t: 'sent',
+      href: '/messages/outbound',
+    },
+    {
+      label: 'Delivered',
+      val: traffic?.deliveredMessages,
+      t: 'delivered',
+      href: '/messages/outbound/delivered',
+    },
+    {
+      label: 'Queued',
+      val: traffic?.queuedMessages,
+      t: 'queued',
+      href: '/messages/outbound',
+    },
+    {
+      label: 'Failed',
+      val: traffic?.failedMessages,
+      t: 'failed',
+      href: '/messages/outbound/failed',
+    },
+    {
+      label: 'Dead Letter',
+      val: traffic?.deadLetterMessages,
+      t: 'dead',
+      href: '/messages/outbound/failed',
+    },
+  ] as const;
+
+  return (
+    <section>
+      <div className="overflow-visible rounded-[1.5rem] border border-slate-100 bg-white p-4 shadow-sm transition-all duration-300 hover:shadow-md sm:p-6">
+        <div className="mb-5">
+          <h3 className="text-lg font-black text-slate-900">{title}</h3>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {(['today', 'week', 'month', 'year'] as const).map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setPeriod(item)}
+              className={`rounded-full px-4 py-2 text-xs font-bold capitalize transition ${
+                period === item
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+
+        <div
+          className={`mx-auto mt-6 grid w-full grid-cols-1 overflow-visible xl:items-center ${
+            compactLinks
+              ? 'max-w-[820px] gap-6 xl:grid-cols-[125px_minmax(0,1fr)]'
+              : 'max-w-[760px] gap-6 xl:grid-cols-[220px_minmax(0,1fr)]'
+          }`}
+        >
+          <div className="min-w-0 space-y-3">
+            <div
+              className={`flex flex-wrap gap-2 xl:flex-col ${
+                compactLinks ? 'xl:max-w-[125px]' : 'xl:max-w-[220px]'
+              }`}
+            >
+              {trafficLinks.map((link) => (
+                <TrafficLink
+                  key={link.label}
+                  href={link.href}
+                  title={link.label}
+                  value={link.val ?? 0}
+                  tone={
+                    link.t as
+                      | 'sent'
+                      | 'delivered'
+                      | 'queued'
+                      | 'failed'
+                      | 'dead'
+                  }
+                  compact={compactLinks}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="min-w-0 overflow-visible">
+            <div
+              className={`mx-auto flex w-full items-center justify-center overflow-visible h-[260px] max-w-[280px] sm:h-[320px] sm:max-w-[360px] xl:h-[360px] xl:max-w-[450px]'
+              }`}
+            >
+              {messageBreakdown.length === 0 ? (
+                <EmptyChart />
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart
+                    margin={{
+                      top: compactLinks ? 16 : 10,
+                      right: compactLinks ? 32 : 10,
+                      bottom: compactLinks ? 16 : 10,
+                      left: compactLinks ? 32 : 10,
+                    }}
+                  >
+                    <Pie
+                      data={messageBreakdown}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={largerChart ? '80%' : '72%'}
+                      label={({ percent }) =>
+                        `${((percent ?? 0) * 100).toFixed(0)}%`
+                      }
+                      isAnimationActive
+                      animationBegin={0}
+                      animationDuration={450}
+                      animationEasing="ease-out"
+                    >
+                      {messageBreakdown.map((entry) => (
+                        <Cell
+                          key={entry.name}
+                          fill={STATUS_COLORS[entry.name] ?? '#64748b'}
+                        />
+                      ))}
+                    </Pie>
+
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CompanyListPanel({
+  title,
+  subtitle,
+  companies,
+  emptyText,
+  highlightRisk = false,
+}: {
+  title: string;
+  subtitle: string;
+  companies: CompanyUsage[];
+  emptyText: string;
+  highlightRisk?: boolean;
+}) {
+  return (
+    <section className="overflow-hidden rounded-[1.5rem] border border-slate-100 bg-white p-4 shadow-sm sm:p-6">
+      <div className="mb-5">
+        <h3 className="text-lg font-black text-slate-900">{title}</h3>
+        <p className="text-sm text-slate-500">{subtitle}</p>
+      </div>
+
+      {companies.length === 0 ? (
+        <div className="rounded-2xl border-2 border-dashed border-slate-100 py-10 text-center text-sm text-slate-400">
+          {emptyText}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {companies.map((company) => (
+            <Link
+  key={company.id}
+  href={`/tenants?companyId=${company.id}`}
+  className="block rounded-2xl border border-slate-100 bg-white p-4 transition hover:-translate-y-0.5 hover:border-blue-100 hover:bg-slate-50 hover:shadow-sm"
+>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <p className="break-words font-black text-slate-900">
+                    {company.name}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Badge label={company.commercialTier} />
+                    <Badge label={company.messagePriority} />
+                    <Badge label={company.status} />
+                  </div>
+                </div>
+
+                <div className="shrink-0 text-left sm:text-right">
+                  <p
+                    className={`text-lg font-black ${
+                      highlightRisk && company.usagePercent >= 90
+                        ? 'text-red-700'
+                        : highlightRisk
+                          ? 'text-yellow-700'
+                          : 'text-slate-900'
+                    }`}
+                  >
+                    {company.usagePercent}%
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {company.smsUsed}/{company.smsQuota} used
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={`h-full rounded-full ${getUsageBarColor(
+                    company.usagePercent,
+                  )}`}
+                  style={{ width: `${Math.min(company.usagePercent, 100)}%` }}
+                />
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RecentMessagesPanel({
+  title,
+  subtitle,
+  messages,
+}: {
+  title: string;
+  subtitle: string;
+  messages: DashboardMessage[];
+}) {
+  return (
+    <section className="overflow-hidden rounded-[1.5rem] border border-slate-100 bg-white p-4 shadow-sm transition-all duration-300 hover:shadow-md sm:p-6">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-lg font-black text-slate-900">{title}</h3>
+          <p className="text-sm text-slate-500">{subtitle}</p>
+        </div>
+
+        <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">
+          {messages?.length ?? 0} latest
+        </span>
+      </div>
+
+      {!messages?.length ? (
+        <div className="rounded-2xl border-2 border-dashed border-slate-100 py-12 text-center text-sm text-slate-400">
+          No recent messages.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {messages.map((message) => (
+            <Link
+              key={message.id}
+              href={`/messages/${message.id}`}
+              className="group block rounded-2xl border border-slate-100 bg-white px-4 py-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-100 hover:bg-slate-50 hover:shadow-sm"
+            >
+              <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                <div className="min-w-0">
+                  <p className="break-words font-bold text-slate-900 transition group-hover:text-blue-700">
+                    {message.recipient}
+                  </p>
+
+                  <p className="mt-1 line-clamp-2 break-words text-sm text-slate-600">
+                    {message.content}
+                  </p>
+
+                  {message.providerName ? (
+                    <p className="mt-2 text-xs font-medium text-slate-400">
+                      Provider: {message.providerName}
+                    </p>
+                  ) : null}
+                </div>
+
+                <span className="shrink-0 text-xs font-medium text-slate-400 md:whitespace-nowrap">
+                  {new Date(message.createdAt).toLocaleString()}
+                </span>
+              </div>
+
+              <span
+                className={`mt-3 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold ${getStatusClass(
+                  message.status,
+                )}`}
+              >
+                {getStatusIcon(message.status)}
+                {formatStatus(message.status)}
+              </span>
+            </Link>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PlatformStatCard({
   title,
   value,
   icon: Icon,
@@ -428,45 +839,28 @@ function MetricCard({
   value: string | number;
   icon: LucideIcon;
   helper: string;
-  tone?: 'default' | 'warning' | 'danger';
+  tone?: 'default' | 'premium';
 }) {
-  const toneClasses = {
-    default: {
-      card: 'border-slate-100 hover:border-blue-100',
-      icon: 'bg-slate-100 text-slate-500 group-hover:bg-blue-50 group-hover:text-blue-600',
-      value: 'text-slate-950',
-    },
-    warning: {
-      card: 'border-yellow-200 hover:border-yellow-300',
-      icon: 'bg-yellow-50 text-yellow-700',
-      value: 'text-yellow-800',
-    },
-    danger: {
-      card: 'border-rose-200 hover:border-rose-300',
-      icon: 'bg-rose-50 text-rose-700',
-      value: 'text-rose-800',
-    },
-  }[tone];
+  const classes =
+    tone === 'premium'
+      ? 'border-purple-100 bg-purple-50 text-purple-900'
+      : 'border-slate-100 bg-white text-slate-900';
 
   return (
     <div
-      className={`group rounded-2xl border bg-white p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg ${toneClasses.card}`}
+      className={`group rounded-2xl border p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg ${classes}`}
     >
-      <div className="flex items-start justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">
             {title}
           </p>
-          <p
-            className={`mt-3 text-4xl font-black tracking-tight ${toneClasses.value}`}
-          >
+          <p className="mt-3 break-words text-4xl font-black tracking-tight">
             {value}
           </p>
         </div>
 
-        <div
-          className={`rounded-2xl p-3 transition-all duration-300 group-hover:scale-110 ${toneClasses.icon}`}
-        >
+        <div className="rounded-2xl bg-white/70 p-3 transition-all duration-300 group-hover:scale-110">
           <Icon className="h-5 w-5" />
         </div>
       </div>
@@ -476,28 +870,37 @@ function MetricCard({
   );
 }
 
-function Panel({
-  title,
-  subtitle,
-  children,
-  className = '',
-}: {
-  title: string;
-  subtitle: string;
-  children: React.ReactNode;
-  className?: string;
-}) {
+function MiniMetric({ label, value }: { label: string; value: string | number }) {
   return (
-    <div
-      className={`overflow-hidden rounded-[1.5rem] border border-slate-100 bg-white p-4 shadow-sm transition-all duration-300 hover:shadow-md sm:p-6 ${className}`}
-    >
-      <div className="mb-4">
-        <h3 className="text-lg font-black text-slate-900">{title}</h3>
-        <p className="text-sm text-slate-500">{subtitle}</p>
-      </div>
-
-      <div className="h-[320px] min-w-0">{children}</div>
+    <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
+      <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
+        {label}
+      </p>
+      <p className="mt-2 break-words text-2xl font-black text-slate-900">
+        {value}
+      </p>
     </div>
+  );
+}
+
+function Badge({ label }: { label: string }) {
+  const tone = label.toLowerCase();
+
+  const classes =
+    tone === 'enterprise'
+      ? 'bg-slate-900 text-white'
+      : tone === 'vip' || tone === 'critical'
+        ? 'bg-purple-50 text-purple-700'
+        : tone === 'high'
+          ? 'bg-yellow-50 text-yellow-700'
+          : tone === 'active'
+            ? 'bg-green-50 text-green-700'
+            : 'bg-slate-100 text-slate-600';
+
+  return (
+    <span className={`rounded-full px-2.5 py-1 text-xs font-black capitalize ${classes}`}>
+      {label.replace('_', ' ')}
+    </span>
   );
 }
 
@@ -608,15 +1011,18 @@ function TrafficLink({
   title,
   value,
   tone,
+  compact = false,
 }: {
   href: string;
   title: string;
   value: number;
   tone: 'sent' | 'delivered' | 'queued' | 'failed' | 'dead';
+  compact?: boolean;
 }) {
   const classes = {
     sent: 'bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-100',
-    delivered: 'bg-green-50 text-green-700 border-green-100 hover:bg-green-100',
+    delivered:
+      'bg-green-50 text-green-700 border-green-100 hover:bg-green-100',
     queued: 'bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-100',
     failed: 'bg-red-50 text-red-700 border-red-100 hover:bg-red-100',
     dead: 'bg-rose-50 text-rose-700 border-rose-100 hover:bg-rose-100',
@@ -625,10 +1031,18 @@ function TrafficLink({
   return (
     <Link
       href={href}
-      className={`inline-flex max-w-full items-center justify-between gap-3 rounded-full border px-4 py-2 text-sm font-bold transition ${classes}`}
+      className={`inline-flex max-w-full items-center justify-between rounded-full border font-bold transition ${classes} ${
+        compact
+          ? 'gap-2 px-3 py-1.5 text-xs'
+          : 'gap-3 px-4 py-2 text-sm'
+      }`}
     >
       <span className="truncate">{title}</span>
-      <span className="shrink-0 rounded-full bg-white/70 px-2 py-0.5 text-xs">
+      <span
+        className={`shrink-0 rounded-full bg-white/70 py-0.5 ${
+          compact ? 'px-1.5 text-[10px]' : 'px-2 text-xs'
+        }`}
+      >
         {value}
       </span>
     </Link>
