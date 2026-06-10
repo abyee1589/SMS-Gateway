@@ -1,18 +1,16 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { type ElementType, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import { ui } from '@/lib/ui';
 import {
   AlertTriangle,
-  CheckCircle2,
   CreditCard,
   Crown,
   ReceiptText,
   ShieldCheck,
   TrendingUp,
-  Zap,
 } from 'lucide-react';
 
 type Tenant = {
@@ -40,7 +38,7 @@ type Tenant = {
 type QuotaTransaction = {
   id: string;
   tenantId: string;
-  type: 'allocation' | 'purchase' | 'usage' | 'refund' | 'adjustment';
+  type: 'allocation' | 'purchase' | 'usage';
   amount: number;
   balanceBefore: number;
   balanceAfter: number;
@@ -86,7 +84,11 @@ export default function BillingPage() {
 
       const [tenantData, transactionsData] = await Promise.all([
         apiFetch<Tenant>('/tenants/me', undefined, token),
-        apiFetch<QuotaTransaction[]>('/tenants/me/quota-transactions', undefined, token),
+        apiFetch<QuotaTransaction[]>(
+          '/tenants/me/quota-transactions',
+          undefined,
+          token,
+        ),
       ]);
 
       setTenant(tenantData);
@@ -103,13 +105,16 @@ export default function BillingPage() {
     loadBilling();
   }, []);
 
-  const remainingSms = tenant ? Math.max(0, tenant.smsQuota - tenant.smsUsed) : 0;
-
-  const usagePercent = tenant && tenant.smsQuota > 0
-    ? Number(((tenant.smsUsed / tenant.smsQuota) * 100).toFixed(1))
+  const remainingSms = tenant
+    ? Math.max(0, tenant.smsQuota - tenant.smsUsed)
     : 0;
 
-  const allocatedSms = useMemo(
+  const usagePercent =
+    tenant && tenant.smsQuota > 0
+      ? Number(((tenant.smsUsed / tenant.smsQuota) * 100).toFixed(1))
+      : 0;
+
+  const creditsAdded = useMemo(
     () =>
       transactions
         .filter((transaction) => transaction.amount > 0)
@@ -117,7 +122,7 @@ export default function BillingPage() {
     [transactions],
   );
 
-  const usedSms = useMemo(
+  const creditsUsed = useMemo(
     () =>
       Math.abs(
         transactions
@@ -141,25 +146,25 @@ export default function BillingPage() {
 
   return (
     <div className={ui.page}>
-      <section className="overflow-hidden rounded-[2rem] bg-slate-950 text-white shadow-xl">
-        <div className="relative p-5 sm:p-7 lg:p-8">
+      <section className="overflow-hidden rounded-[1.5rem] bg-slate-950 text-white shadow-xl sm:rounded-[2rem]">
+        <div className="relative p-4 sm:p-7 lg:p-8">
           <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-blue-500/20 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-20 left-1/2 h-60 w-60 rounded-full bg-cyan-400/10 blur-3xl" />
 
           <div className="relative grid gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
-            <div>
+            <div className="min-w-0">
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200">
                 <CreditCard className="h-3.5 w-3.5 text-blue-300" />
                 Billing & Subscription
               </div>
 
-              <h1 className="mt-5 break-words text-3xl font-black tracking-tight sm:text-4xl">
+              <h1 className="mt-5 break-words text-2xl font-black tracking-tight sm:text-4xl">
                 {tenant.name}
               </h1>
 
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
-                Monitor your SMS quota, subscription status, usage history, and
-                commercial billing profile.
+                Monitor your SMS credits, subscription status, usage history,
+                and company billing profile.
               </p>
 
               <div className="mt-5 flex flex-wrap gap-2">
@@ -170,7 +175,7 @@ export default function BillingPage() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-white/10 bg-white/10 p-5 backdrop-blur">
+            <div className="min-w-0 rounded-3xl border border-white/10 bg-white/10 p-4 backdrop-blur sm:p-5">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-sm font-semibold text-slate-200">
                   SMS usage
@@ -187,19 +192,10 @@ export default function BillingPage() {
                 />
               </div>
 
-              <div className="mt-4 grid grid-cols-3 gap-3 text-center">
-                <div>
-                  <p className="text-xs text-slate-400">Quota</p>
-                  <p className="mt-1 font-black">{tenant.smsQuota}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400">Used</p>
-                  <p className="mt-1 font-black">{tenant.smsUsed}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400">Left</p>
-                  <p className="mt-1 font-black">{remainingSms}</p>
-                </div>
+              <div className="mt-4 grid grid-cols-3 gap-2 text-center sm:gap-3">
+                <UsageMiniStat label="Quota" value={tenant.smsQuota} />
+                <UsageMiniStat label="Used" value={tenant.smsUsed} />
+                <UsageMiniStat label="Left" value={remainingSms} />
               </div>
             </div>
           </div>
@@ -208,7 +204,7 @@ export default function BillingPage() {
 
       {usagePercent >= 70 ? (
         <div
-          className={`rounded-2xl border px-5 py-4 ${
+          className={`rounded-2xl border px-4 py-4 sm:px-5 ${
             usagePercent >= 90
               ? 'border-red-200 bg-red-50 text-red-700'
               : 'border-yellow-200 bg-yellow-50 text-yellow-800'
@@ -216,44 +212,54 @@ export default function BillingPage() {
         >
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-            <div>
+            <div className="min-w-0">
               <p className="font-black">
                 {usagePercent >= 90
-                  ? 'SMS quota is almost exhausted'
-                  : 'SMS quota usage is getting high'}
+                  ? 'SMS credits are almost exhausted'
+                  : 'SMS credit usage is getting high'}
               </p>
-              <p className="mt-1 text-sm">
-                Your company has used {usagePercent}% of its SMS quota. Contact
-                Zergaw support or your account manager to purchase more quota.
+              <p className="mt-1 text-sm leading-6">
+                Your company has used {usagePercent}% of its SMS credits.
+                Contact Zergaw support or your account manager to purchase more
+                credits.
               </p>
             </div>
           </div>
         </div>
       ) : null}
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Subscription"
           value={formatLabel(tenant.subscriptionStatus)}
-          helper={tenant.subscriptionEndDate ? `Expires ${new Date(tenant.subscriptionEndDate).toLocaleDateString()}` : 'No expiry date set'}
+          helper={
+            tenant.subscriptionEndDate
+              ? `Expires ${new Date(
+                  tenant.subscriptionEndDate,
+                ).toLocaleDateString()}`
+              : 'No expiry date set'
+          }
           icon={ShieldCheck}
         />
+
         <StatCard
           label="Commercial Tier"
           value={formatLabel(tenant.commercialTier)}
           helper={`${tenant.discountPercent}% account discount`}
           icon={Crown}
         />
+
         <StatCard
-          label="Allocated Ledger"
-          value={allocatedSms}
-          helper="Quota added through billing ledger"
+          label="Credits Added"
+          value={creditsAdded}
+          helper="SMS credits added through subscriptions or manual top-ups"
           icon={ReceiptText}
         />
+
         <StatCard
-          label="Used Ledger"
-          value={usedSms}
-          helper="SMS usage tracked in ledger"
+          label="Credits Used"
+          value={creditsUsed}
+          helper="SMS credits consumed by sent messages"
           icon={TrendingUp}
         />
       </section>
@@ -268,12 +274,38 @@ export default function BillingPage() {
 
             <div className="mt-5 space-y-3">
               <InfoRow label="Company" value={tenant.name} />
-              <InfoRow label="Legal Name" value={tenant.legalName || 'Not set'} />
-              <InfoRow label="TIN Number" value={tenant.tinNumber || 'Not set'} />
-              <InfoRow label="Contact Email" value={tenant.contactEmail || 'Not set'} />
-              <InfoRow label="Contact Phone" value={tenant.contactPhone || 'Not set'} />
-              <InfoRow label="Subscription Start" value={tenant.subscriptionStartDate ? new Date(tenant.subscriptionStartDate).toLocaleString() : 'Not set'} />
-              <InfoRow label="Subscription End" value={tenant.subscriptionEndDate ? new Date(tenant.subscriptionEndDate).toLocaleString() : 'Not set'} />
+              <InfoRow
+                label="Legal Name"
+                value={tenant.legalName || 'Not set'}
+              />
+              <InfoRow
+                label="TIN Number"
+                value={tenant.tinNumber || 'Not set'}
+              />
+              <InfoRow
+                label="Contact Email"
+                value={tenant.contactEmail || 'Not set'}
+              />
+              <InfoRow
+                label="Contact Phone"
+                value={tenant.contactPhone || 'Not set'}
+              />
+              <InfoRow
+                label="Subscription Start"
+                value={
+                  tenant.subscriptionStartDate
+                    ? new Date(tenant.subscriptionStartDate).toLocaleString()
+                    : 'Not set'
+                }
+              />
+              <InfoRow
+                label="Subscription End"
+                value={
+                  tenant.subscriptionEndDate
+                    ? new Date(tenant.subscriptionEndDate).toLocaleString()
+                    : 'Not set'
+                }
+              />
             </div>
           </div>
         </div>
@@ -281,10 +313,10 @@ export default function BillingPage() {
         <div className={ui.card}>
           <div className={ui.cardBody}>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className={ui.sectionTitle}>Quota History</h2>
+              <div className="min-w-0">
+                <h2 className={ui.sectionTitle}>SMS Credit History</h2>
                 <p className={ui.sectionSubtitle}>
-                  Allocation and usage transactions for your company.
+                  Balance changes from subscriptions, manual top-ups, and SMS usage.
                 </p>
               </div>
 
@@ -293,10 +325,10 @@ export default function BillingPage() {
               </span>
             </div>
 
-            <div className="mt-5 max-h-[520px] space-y-3 overflow-y-auto pr-1">
+            <div className="mt-5 max-h-[520px] space-y-3 overflow-y-auto pr-0 sm:pr-1">
               {transactions.length === 0 ? (
-                <div className="rounded-2xl border-2 border-dashed border-slate-100 py-12 text-center text-sm text-slate-400">
-                  No quota transactions yet.
+                <div className="rounded-2xl border-2 border-dashed border-slate-100 px-4 py-12 text-center text-sm text-slate-400">
+                  No SMS credit activity yet.
                 </div>
               ) : (
                 transactions.map((transaction) => (
@@ -314,6 +346,25 @@ export default function BillingPage() {
   );
 }
 
+function UsageMiniStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="min-w-0 rounded-2xl bg-white/5 px-2 py-3">
+      <p className="text-[11px] font-semibold text-slate-400 sm:text-xs">
+        {label}
+      </p>
+      <p className="mt-1 break-words text-sm font-black sm:text-base">
+        {value}
+      </p>
+    </div>
+  );
+}
+
 function StatCard({
   label,
   value,
@@ -323,35 +374,35 @@ function StatCard({
   label: string;
   value: string | number;
   helper: string;
-  icon: React.ElementType;
+  icon: ElementType;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md sm:p-5">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">
+        <div className="min-w-0">
+          <p className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400 sm:text-xs sm:tracking-[0.18em]">
             {label}
           </p>
-          <p className="mt-3 break-words text-2xl font-black text-slate-950">
+          <p className="mt-3 break-words text-xl font-black text-slate-950 sm:text-2xl">
             {value}
           </p>
         </div>
 
-        <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
+        <div className="shrink-0 rounded-2xl bg-blue-50 p-3 text-blue-700">
           <Icon className="h-5 w-5" />
         </div>
       </div>
 
-      <p className="mt-3 text-sm text-slate-500">{helper}</p>
+      <p className="mt-3 text-sm leading-6 text-slate-500">{helper}</p>
     </div>
   );
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex flex-col gap-1 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="grid gap-1 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 sm:grid-cols-[150px_minmax(0,1fr)] sm:items-center">
       <span className="text-sm font-semibold text-slate-500">{label}</span>
-      <span className="break-words text-sm font-black text-slate-900 sm:text-right">
+      <span className="min-w-0 break-words text-sm font-black text-slate-900 sm:text-right">
         {value}
       </span>
     </div>
@@ -367,17 +418,17 @@ function QuotaTransactionItem({
 
   return (
     <div className="rounded-2xl border border-slate-100 bg-white px-4 py-4 shadow-sm">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <span
-              className={`rounded-full px-2.5 py-1 text-xs font-black capitalize ${
+              className={`rounded-full px-2.5 py-1 text-xs font-black ${
                 transaction.type === 'usage'
                   ? 'bg-red-50 text-red-700'
                   : 'bg-green-50 text-green-700'
               }`}
             >
-              {transaction.type}
+              {formatTransactionType(transaction.type)}
             </span>
 
             <span
@@ -390,20 +441,20 @@ function QuotaTransactionItem({
             </span>
           </div>
 
-          <p className="mt-2 break-words text-sm text-slate-600">
+          <p className="mt-2 break-words text-sm leading-6 text-slate-600">
             {transaction.reason || 'No reason provided'}
           </p>
 
           {transaction.referenceId ? (
-            <p className="mt-1 break-all text-xs text-slate-400">
+            <p className="mt-1 break-all text-xs leading-5 text-slate-400">
               Ref: {transaction.referenceId}
             </p>
           ) : null}
         </div>
 
-        <div className="shrink-0 text-left sm:text-right">
+        <div className="shrink-0 text-left lg:text-right">
           <p className="text-sm font-black text-slate-900">
-            {transaction.balanceBefore} → {transaction.balanceAfter}
+            Balance: {transaction.balanceBefore} → {transaction.balanceAfter}
           </p>
           <p className="mt-1 text-xs text-slate-400">
             {new Date(transaction.createdAt).toLocaleString()}
@@ -429,7 +480,9 @@ function Badge({ label }: { label: string }) {
             : 'bg-slate-100 text-slate-700';
 
   return (
-    <span className={`rounded-full px-2.5 py-1 text-xs font-black capitalize ${classes}`}>
+    <span
+      className={`rounded-full px-2.5 py-1 text-xs font-black capitalize ${classes}`}
+    >
       {label.replace('_', ' ')}
     </span>
   );
@@ -444,6 +497,19 @@ function formatLabel(value?: string | null) {
     .join(' ');
 }
 
+function formatTransactionType(type: QuotaTransaction['type']) {
+  switch (type) {
+    case 'allocation':
+      return 'Credits Added';
+    case 'purchase':
+      return 'Purchase';
+    case 'usage':
+      return 'SMS Used';
+    default:
+      return formatLabel(type);
+  }
+}
+
 function getUsageBarColor(usagePercent: number) {
   if (usagePercent >= 90) return 'bg-red-400';
   if (usagePercent >= 70) return 'bg-yellow-400';
@@ -453,12 +519,18 @@ function getUsageBarColor(usagePercent: number) {
 function BillingSkeleton() {
   return (
     <div className="space-y-6">
-      <div className="h-60 animate-pulse rounded-[2rem] bg-slate-100" />
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+      <div className="h-60 animate-pulse rounded-[1.5rem] bg-slate-100 sm:rounded-[2rem]" />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="h-32 animate-pulse rounded-2xl bg-slate-100" />
         <div className="h-32 animate-pulse rounded-2xl bg-slate-100" />
         <div className="h-32 animate-pulse rounded-2xl bg-slate-100" />
         <div className="h-32 animate-pulse rounded-2xl bg-slate-100" />
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.85fr_1.15fr]">
+        <div className="h-80 animate-pulse rounded-2xl bg-slate-100" />
+        <div className="h-80 animate-pulse rounded-2xl bg-slate-100" />
       </div>
     </div>
   );

@@ -14,6 +14,7 @@ import { CreateMessageDto } from './dto/create-message.dto';
 import { QueryMessagesDto } from './dto/query-messages.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Request } from 'express';
+import { CreateBulkMessageDto } from './dto/create-bulk-message.dto';
 
 // Define the shape of the user coming from your Auth Guard
 interface RequestWithUser extends Request {
@@ -68,6 +69,14 @@ export class SmsController {
     @Req() req: RequestWithUser,
   ) {
     return this.smsService.cancelScheduledMessage(id, req.user);
+  }
+
+  @Post('bulk')
+  createBulk(
+    @Body() dto: CreateBulkMessageDto,
+    @Req() req: RequestWithUser,
+  ) {
+    return this.smsService.createBulkMessages(dto, req.user);
   }
 
   @Get(':id')

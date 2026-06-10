@@ -218,7 +218,7 @@ function PlatformDashboard({
 
   return (
     <div className="space-y-6 sm:space-y-8">
-      <header className="overflow-hidden rounded-[2rem] bg-slate-950 text-white shadow-xl">
+      <header className="overflow-hidden rounded-[1.5rem] bg-slate-950 text-white shadow-xl sm:rounded-[2rem]">
         <div className="relative p-5 sm:p-7 lg:p-8">
           <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-blue-500/20 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-20 left-1/2 h-60 w-60 rounded-full bg-cyan-400/10 blur-3xl" />
@@ -261,6 +261,7 @@ function PlatformDashboard({
           helper={`${platform?.activeCompanies ?? 0} active companies`}
           icon={Building2}
         />
+
         <PlatformStatCard
           title="VIP / Enterprise"
           value={platform?.vipCompanies ?? 0}
@@ -268,12 +269,14 @@ function PlatformDashboard({
           icon={Crown}
           tone="premium"
         />
+
         <PlatformStatCard
           title="Quota Allocated"
           value={platform?.totalSmsQuota ?? 0}
           helper={`${platform?.totalRemainingSms ?? 0} SMS remaining`}
           icon={Zap}
         />
+
         <PlatformStatCard
           title="Platform Users"
           value={platform?.totalUsers ?? 0}
@@ -293,6 +296,7 @@ function PlatformDashboard({
                 Total used quota across all companies.
               </p>
             </div>
+
             <span className="w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
               {usagePercent}% used
             </span>
@@ -304,6 +308,7 @@ function PlatformDashboard({
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
                   Used / Allocated
                 </p>
+
                 <p className="mt-2 text-3xl font-black sm:text-4xl">
                   {platform?.totalSmsUsed ?? 0}
                   <span className="text-lg text-slate-400">
@@ -312,6 +317,7 @@ function PlatformDashboard({
                   </span>
                 </p>
               </div>
+
               <p className="text-sm text-slate-300">
                 Remaining: {platform?.totalRemainingSms ?? 0}
               </p>
@@ -330,7 +336,10 @@ function PlatformDashboard({
           <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <MiniMetric label="Messages" value={platformTrafficTotal} />
             <MiniMetric label="Delivered" value={traffic.deliveredMessages} />
-            <MiniMetric label="Delivery Rate" value={`${traffic.deliveryRate}%`} />
+            <MiniMetric
+              label="Delivery Rate"
+              value={`${traffic.deliveryRate}%`}
+            />
           </div>
         </div>
 
@@ -401,7 +410,15 @@ function TenantDashboard({
   return (
     <div className="space-y-6 sm:space-y-8">
       <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div />
+        <div className="min-w-0">
+          <h1 className="text-2xl font-black tracking-tight text-slate-950">
+            Dashboard
+          </h1>
+          <p className="mt-1 text-sm leading-6 text-slate-500">
+            Monitor your company SMS activity, quota usage, and recent delivery
+            status.
+          </p>
+        </div>
 
         <Link
           href="/messages/new"
@@ -412,7 +429,7 @@ function TenantDashboard({
         </Link>
       </header>
 
-      <section className="overflow-hidden rounded-[2rem] bg-slate-950 text-white shadow-xl">
+      <section className="overflow-hidden rounded-[1.5rem] bg-slate-950 text-white shadow-xl sm:rounded-[2rem]">
         <div className="relative p-5 sm:p-7 lg:p-8">
           <div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-blue-500/20 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-20 left-1/2 h-60 w-60 rounded-full bg-cyan-400/10 blur-3xl" />
@@ -519,23 +536,21 @@ function TenantDashboard({
   );
 }
 
-  function TrafficPanel({
-    title,
-    period,
-    setPeriod,
-    traffic,
-    messageBreakdown,
-    compactLinks = false,
-    largerChart = false,
-  }: {
-    title: string;
-    period: DashboardPeriod;
-    setPeriod: (period: DashboardPeriod) => void;
-    traffic: DashboardStats['traffic'];
-    messageBreakdown: { name: string; value: number }[];
-    compactLinks?: boolean;
-    largerChart?: boolean;
-  }) {
+function TrafficPanel({
+  title,
+  period,
+  setPeriod,
+  traffic,
+  messageBreakdown,
+  compactLinks = false,
+}: {
+  title: string;
+  period: DashboardPeriod;
+  setPeriod: (period: DashboardPeriod) => void;
+  traffic: DashboardStats['traffic'];
+  messageBreakdown: { name: string; value: number }[];
+  compactLinks?: boolean;
+}) {
   const trafficLinks = [
     {
       label: 'Sent',
@@ -627,10 +642,7 @@ function TenantDashboard({
           </div>
 
           <div className="min-w-0 overflow-visible">
-            <div
-              className={`mx-auto flex w-full items-center justify-center overflow-visible h-[260px] max-w-[280px] sm:h-[320px] sm:max-w-[360px] xl:h-[360px] xl:max-w-[450px]'
-              }`}
-            >
+            <div className="mx-auto flex h-[260px] w-full max-w-[280px] items-center justify-center overflow-visible sm:h-[320px] sm:max-w-[360px] xl:h-[360px] xl:max-w-[450px]">
               {messageBreakdown.length === 0 ? (
                 <EmptyChart />
               ) : (
@@ -649,7 +661,7 @@ function TenantDashboard({
                       nameKey="name"
                       cx="50%"
                       cy="50%"
-                      outerRadius={largerChart ? '80%' : '72%'}
+                      outerRadius="72%"
                       label={({ percent }) =>
                         `${((percent ?? 0) * 100).toFixed(0)}%`
                       }
@@ -706,15 +718,16 @@ function CompanyListPanel({
         <div className="space-y-3">
           {companies.map((company) => (
             <Link
-  key={company.id}
-  href={`/tenants?companyId=${company.id}`}
-  className="block rounded-2xl border border-slate-100 bg-white p-4 transition hover:-translate-y-0.5 hover:border-blue-100 hover:bg-slate-50 hover:shadow-sm"
->
+              key={company.id}
+              href={`/tenants?companyId=${company.id}`}
+              className="block rounded-2xl border border-slate-100 bg-white p-4 transition hover:-translate-y-0.5 hover:border-blue-100 hover:bg-slate-50 hover:shadow-sm"
+            >
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <p className="break-words font-black text-slate-900">
                     {company.name}
                   </p>
+
                   <div className="mt-2 flex flex-wrap gap-2">
                     <Badge label={company.commercialTier} />
                     <Badge label={company.messagePriority} />
@@ -734,6 +747,7 @@ function CompanyListPanel({
                   >
                     {company.usagePercent}%
                   </p>
+
                   <p className="text-xs text-slate-500">
                     {company.smsUsed}/{company.smsQuota} used
                   </p>
@@ -855,6 +869,7 @@ function PlatformStatCard({
           <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">
             {title}
           </p>
+
           <p className="mt-3 break-words text-4xl font-black tracking-tight">
             {value}
           </p>
@@ -870,12 +885,19 @@ function PlatformStatCard({
   );
 }
 
-function MiniMetric({ label, value }: { label: string; value: string | number }) {
+function MiniMetric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
   return (
     <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-4">
       <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
         {label}
       </p>
+
       <p className="mt-2 break-words text-2xl font-black text-slate-900">
         {value}
       </p>
@@ -898,7 +920,9 @@ function Badge({ label }: { label: string }) {
             : 'bg-slate-100 text-slate-600';
 
   return (
-    <span className={`rounded-full px-2.5 py-1 text-xs font-black capitalize ${classes}`}>
+    <span
+      className={`rounded-full px-2.5 py-1 text-xs font-black capitalize ${classes}`}
+    >
       {label.replace('_', ' ')}
     </span>
   );
@@ -924,6 +948,7 @@ function AlertCard({
     <div className={`rounded-2xl border px-5 py-4 ${classes}`}>
       <div className="flex items-start gap-3">
         <Icon className="mt-0.5 h-5 w-5 shrink-0" />
+
         <div className="min-w-0">
           <p className="font-black">{title}</p>
           <p className="mt-1 text-sm">{description}</p>
@@ -996,7 +1021,7 @@ function DashboardSkeleton() {
   return (
     <div className="space-y-6">
       <div className="h-10 w-full max-w-72 animate-pulse rounded-xl bg-slate-100" />
-      <div className="h-56 animate-pulse rounded-[2rem] bg-slate-100" />
+      <div className="h-56 animate-pulse rounded-[1.5rem] bg-slate-100 sm:rounded-[2rem]" />
       <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
         <div className="h-36 animate-pulse rounded-2xl bg-slate-100" />
         <div className="h-36 animate-pulse rounded-2xl bg-slate-100" />
@@ -1033,14 +1058,14 @@ function TrafficLink({
       href={href}
       className={`inline-flex max-w-full items-center justify-between rounded-full border font-bold transition ${classes} ${
         compact
-          ? 'gap-2 px-3 py-1.5 text-xs'
+          ? 'gap-1.5 px-2.5 py-1.5 text-[11px]'
           : 'gap-3 px-4 py-2 text-sm'
       }`}
     >
       <span className="truncate">{title}</span>
       <span
         className={`shrink-0 rounded-full bg-white/70 py-0.5 ${
-          compact ? 'px-1.5 text-[10px]' : 'px-2 text-xs'
+          compact ? 'px-1.5 text-[9px]' : 'px-2 text-xs'
         }`}
       >
         {value}

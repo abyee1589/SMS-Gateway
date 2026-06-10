@@ -135,11 +135,24 @@ function formatDate(value?: string | null) {
   return new Date(value).toLocaleString();
 }
 
-function getApiPathForTab(tab: MessagesTab) {
-  if (tab === 'scheduled') return '/messages?status=scheduled';
-  if (tab === 'cancelled') return '/messages?status=cancelled';
+function getApiPathForTab(tab: MessagesTab, search?: string) {
+  const params = new URLSearchParams();
 
-  return '/messages';
+  if (tab === 'scheduled') {
+    params.set('status', 'scheduled');
+  }
+
+  if (tab === 'cancelled') {
+    params.set('status', 'cancelled');
+  }
+
+  if (search?.trim()) {
+    params.set('search', search.trim());
+  }
+
+  const query = params.toString();
+
+  return query ? `/messages?${query}` : '/messages';
 }
 
 export default function MessagesListPage({
@@ -154,6 +167,9 @@ export default function MessagesListPage({
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [retryConfirmId, setRetryConfirmId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  
 
   const isScheduledSection =
     initialTab === 'scheduled' || initialTab === 'cancelled';
@@ -195,6 +211,7 @@ export default function MessagesListPage({
     return messages;
   }, [initialTab, messages]);
 
+
   const loadMessages = useCallback(async () => {
     const token = getToken();
 
@@ -208,7 +225,7 @@ export default function MessagesListPage({
       setPageLoading(true);
 
       const response = await apiFetch<MessagesResponse>(
-        getApiPathForTab(initialTab),
+        getApiPathForTab(initialTab, debouncedSearch),
         undefined,
         token,
       );
@@ -220,7 +237,15 @@ export default function MessagesListPage({
     } finally {
       setPageLoading(false);
     }
-  }, [initialTab]);
+  }, [initialTab, debouncedSearch]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+    }, 350);
+
+    return () => window.clearTimeout(timeout);
+  }, [search]);
 
   useEffect(() => {
     loadMessages();
@@ -429,6 +454,37 @@ export default function MessagesListPage({
           </div>
         </div>
 
+        <div className="border-b border-slate-100 bg-white p-3 sm:p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="min-w-0 flex-1">
+              <label className="sr-only">Search messages</label>
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
+                placeholder="Search by phone or message content..."
+              />
+            </div>
+
+            {search ? (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className={`${ui.secondaryButton} w-full justify-center sm:w-auto`}
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+
+          {debouncedSearch ? (
+            <p className="mt-2 text-xs font-medium text-slate-500">
+              Searching for “{debouncedSearch}”
+            </p>
+          ) : null}
+        </div>
+
         <div className="p-4 sm:p-6">
           {error ? <div className={ui.alertError}>{error}</div> : null}
 
@@ -438,7 +494,9 @@ export default function MessagesListPage({
             </div>
           ) : visibleMessages.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 py-14 text-center">
-              <p className="font-semibold text-slate-700">No messages found</p>
+              <p className="font-semibold text-slate-700">{debouncedSearch
+  ? 'No message matched your search.'
+  : 'No message found.'}</p>
               <p className="mt-1 text-sm text-slate-500">
                 Messages matching this view will appear here.
               </p>

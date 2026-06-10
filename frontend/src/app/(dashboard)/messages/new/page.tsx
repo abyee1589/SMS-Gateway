@@ -9,6 +9,30 @@ import { ui } from '@/lib/ui';
 import toast from 'react-hot-toast';
 
 type SendMode = 'now' | 'schedule';
+type TargetMode = 'single' | 'multiple' | 'group';
+
+type ContactGroup = {
+  id: string;
+  name: string;
+  description?: string | null;
+  contacts?: Array<{
+    id: string;
+    phone: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    isActive?: boolean;
+  }>;
+};
+
+type BulkMessageResponse = {
+  success: boolean;
+  status: string;
+  totalRecipients: number;
+  queued: number;
+  duplicatesRemoved: number;
+  scheduledAt?: string | null;
+  messageIds: string[];
+};
 
 function getMinScheduleDateTime() {
   const date = new Date(Date.now() + 60 * 1000);
@@ -18,12 +42,27 @@ function getMinScheduleDateTime() {
   return localDate.toISOString().slice(0, 16);
 }
 
+function parseManualRecipients(value: string) {
+  return value
+    .split(/[\n,;]+/)
+    .map((recipient) => recipient.trim())
+    .filter(Boolean);
+}
+
 export default function NewMessagePage() {
   const searchParams = useSearchParams();
 
+  const [targetMode, setTargetMode] = useState<TargetMode>(() =>
+    searchParams.get('recipient') ? 'single' : 'single',
+  );
   const [recipient, setRecipient] = useState(
     () => searchParams.get('recipient') ?? '',
   );
+  const [bulkRecipientsText, setBulkRecipientsText] = useState('');
+  const [selectedGroupId, setSelectedGroupId] = useState('');
+  const [contactGroups, setContactGroups] = useState<ContactGroup[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(false);
+
   const [content, setContent] = useState(() => searchParams.get('content') ?? '');
   const [sendMode, setSendMode] = useState<SendMode>(() =>
     searchParams.get('mode') === 'schedule' ? 'schedule' : 'now',
@@ -36,10 +75,39 @@ export default function NewMessagePage() {
     const contentParam = searchParams.get('content');
     const modeParam = searchParams.get('mode');
 
-    if (recipientParam !== null) setRecipient(recipientParam);
+    if (recipientParam !== null) {
+      setTargetMode('single');
+      setRecipient(recipientParam);
+    }
+
     if (contentParam !== null) setContent(contentParam);
     if (modeParam === 'schedule') setSendMode('schedule');
   }, [searchParams]);
+
+  useEffect(() => {
+    async function loadContactGroups() {
+      const token = getToken();
+
+      if (!token) return;
+
+      try {
+        setGroupsLoading(true);
+        const data = await apiFetch<ContactGroup[]>(
+          '/contact-groups',
+          undefined,
+          token,
+        );
+
+        setContactGroups(data);
+      } catch (error) {
+        console.error('Failed to load contact groups', error);
+      } finally {
+        setGroupsLoading(false);
+      }
+    }
+
+    loadContactGroups();
+  }, []);
 
   const characterCount = content.length;
 
@@ -48,15 +116,54 @@ export default function NewMessagePage() {
     return Math.ceil(content.length / 160);
   }, [content]);
 
+  const manualRecipients = useMemo(
+    () => parseManualRecipients(bulkRecipientsText),
+    [bulkRecipientsText],
+  );
+
+  const selectedGroup = useMemo(
+    () => contactGroups.find((group) => group.id === selectedGroupId),
+    [contactGroups, selectedGroupId],
+  );
+
+  const selectedGroupRecipientCount =
+    selectedGroup?.contacts?.filter((contact) => contact.isActive !== false)
+      .length ?? 0;
+
+  const estimatedRecipientCount = useMemo(() => {
+    if (targetMode === 'single') return recipient.trim() ? 1 : 0;
+    if (targetMode === 'multiple') return manualRecipients.length;
+    if (targetMode === 'group') return selectedGroupRecipientCount;
+
+    return 0;
+  }, [
+    targetMode,
+    recipient,
+    manualRecipients.length,
+    selectedGroupRecipientCount,
+  ]);
+
+  const estimatedTotalSegments = estimatedSegments * estimatedRecipientCount;
+
   const minScheduleDateTime = useMemo(() => getMinScheduleDateTime(), []);
+
+  const isBulkMode = targetMode === 'multiple' || targetMode === 'group';
 
   const submitButtonText = loading
     ? sendMode === 'schedule'
-      ? 'Scheduling...'
-      : 'Sending...'
+      ? isBulkMode
+        ? 'Scheduling bulk...'
+        : 'Scheduling...'
+      : isBulkMode
+        ? 'Sending bulk...'
+        : 'Sending...'
     : sendMode === 'schedule'
-      ? 'Schedule Message'
-      : 'Send Message';
+      ? isBulkMode
+        ? 'Schedule Bulk SMS'
+        : 'Schedule Message'
+      : isBulkMode
+        ? 'Send Bulk SMS'
+        : 'Send Message';
 
   function getScheduledIso() {
     if (!scheduledAt) return null;
@@ -71,10 +178,32 @@ export default function NewMessagePage() {
   }
 
   function resetForm() {
+    setTargetMode('single');
     setRecipient('');
+    setBulkRecipientsText('');
+    setSelectedGroupId('');
     setContent('');
     setScheduledAt('');
     setSendMode('now');
+  }
+
+  function validateTarget() {
+    if (targetMode === 'single' && !recipient.trim()) {
+      toast.error('Recipient phone number is required');
+      return false;
+    }
+
+    if (targetMode === 'multiple' && manualRecipients.length === 0) {
+      toast.error('Add at least one recipient phone number');
+      return false;
+    }
+
+    if (targetMode === 'group' && !selectedGroupId) {
+      toast.error('Please select a contact group');
+      return false;
+    }
+
+    return true;
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -87,8 +216,12 @@ export default function NewMessagePage() {
       return;
     }
 
-    if (!recipient.trim() || !content.trim()) {
-      toast.error('Recipient and message are required');
+    if (!validateTarget()) {
+      return;
+    }
+
+    if (!content.trim()) {
+      toast.error('Message is required');
       return;
     }
 
@@ -111,28 +244,70 @@ export default function NewMessagePage() {
     setLoading(true);
 
     try {
-      await apiFetch(
-        '/messages',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            recipient: recipient.trim(),
-            content: content.trim(),
-            ...(sendMode === 'schedule' && scheduledIso
-              ? { scheduledAt: scheduledIso }
-              : {}),
-          }),
-        },
-        token,
-      );
+      if (targetMode === 'single') {
+        await apiFetch(
+          '/messages',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              recipient: recipient.trim(),
+              content: content.trim(),
+              ...(sendMode === 'schedule' && scheduledIso
+                ? { scheduledAt: scheduledIso }
+                : {}),
+            }),
+          },
+          token,
+        );
+
+        toast.success(
+          sendMode === 'schedule'
+            ? 'Message scheduled successfully'
+            : 'Message queued successfully',
+        );
+      } else {
+        const payload =
+          targetMode === 'multiple'
+            ? {
+                recipients: manualRecipients,
+                content: content.trim(),
+                ...(sendMode === 'schedule' && scheduledIso
+                  ? { scheduledAt: scheduledIso }
+                  : {}),
+              }
+            : {
+                contactGroupId: selectedGroupId,
+                content: content.trim(),
+                ...(sendMode === 'schedule' && scheduledIso
+                  ? { scheduledAt: scheduledIso }
+                  : {}),
+              };
+
+        const response = await apiFetch<BulkMessageResponse>(
+          '/messages/bulk',
+          {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          },
+          token,
+        );
+
+        toast.success(
+          sendMode === 'schedule'
+            ? `${response.totalRecipients} SMS scheduled successfully`
+            : `${response.queued} SMS queued successfully`,
+        );
+
+        if (response.duplicatesRemoved > 0) {
+          toast(
+            `${response.duplicatesRemoved} duplicate recipient${
+              response.duplicatesRemoved === 1 ? '' : 's'
+            } removed`,
+          );
+        }
+      }
 
       resetForm();
-
-      toast.success(
-        sendMode === 'schedule'
-          ? 'Message scheduled successfully'
-          : 'Message queued successfully',
-      );
     } catch (error) {
       console.error('Failed to submit message', error);
 
@@ -157,7 +332,7 @@ export default function NewMessagePage() {
               <div className="min-w-0">
                 <h2 className="text-2xl font-bold">New Message</h2>
                 <p className="mt-1 text-sm leading-6 text-slate-300">
-                  Send now or schedule an SMS for later delivery.
+                  Send now or schedule single and bulk SMS messages.
                 </p>
               </div>
 
@@ -191,20 +366,113 @@ export default function NewMessagePage() {
 
           <div className="p-4 sm:p-6">
             <form onSubmit={handleSubmit} className="space-y-5">
-              <div className="space-y-1.5">
-                <label className={ui.label}>Recipient Phone Number</label>
-                <input
-                  type="text"
-                  value={recipient}
-                  onChange={(e) => setRecipient(e.target.value)}
-                  placeholder="+2519XXXXXXXX or 09XXXXXXXX"
-                  className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
-                />
-                <p className="text-xs leading-5 text-slate-400">
-                  Ethiopian local numbers will be normalized automatically by
-                  the backend.
-                </p>
+              <div className="space-y-2">
+                <label className={ui.label}>Send To</label>
+
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <TargetModeButton
+                    active={targetMode === 'single'}
+                    title="Single Number"
+                    description="Send to one recipient"
+                    onClick={() => setTargetMode('single')}
+                  />
+
+                  <TargetModeButton
+                    active={targetMode === 'multiple'}
+                    title="Multiple Numbers"
+                    description="Paste many numbers"
+                    onClick={() => setTargetMode('multiple')}
+                  />
+
+                  <TargetModeButton
+                    active={targetMode === 'group'}
+                    title="Contact Group"
+                    description="Send to a saved group"
+                    onClick={() => setTargetMode('group')}
+                  />
+                </div>
               </div>
+
+              {targetMode === 'single' ? (
+                <div className="space-y-1.5">
+                  <label className={ui.label}>Recipient Phone Number</label>
+                  <input
+                    type="text"
+                    value={recipient}
+                    onChange={(e) => setRecipient(e.target.value)}
+                    placeholder="+2519XXXXXXXX or 09XXXXXXXX"
+                    className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
+                  />
+                  <p className="text-xs leading-5 text-slate-400">
+                    Ethiopian local numbers will be normalized automatically by
+                    the backend.
+                  </p>
+                </div>
+              ) : null}
+
+              {targetMode === 'multiple' ? (
+                <div className="space-y-1.5">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <label className={ui.label}>Recipient Phone Numbers</label>
+                    <span className="text-xs text-slate-400">
+                      {manualRecipients.length} recipient
+                      {manualRecipients.length === 1 ? '' : 's'}
+                    </span>
+                  </div>
+
+                  <textarea
+                    value={bulkRecipientsText}
+                    onChange={(e) => setBulkRecipientsText(e.target.value)}
+                    placeholder={`0915948189\n0911111111\nor comma-separated numbers`}
+                    className={`${ui.textarea} min-h-36 transition focus:ring-4 focus:ring-blue-100`}
+                  />
+
+                  <p className="text-xs leading-5 text-slate-400">
+                    Separate numbers with a new line, comma, or semicolon.
+                    Duplicates are removed automatically.
+                  </p>
+                </div>
+              ) : null}
+
+              {targetMode === 'group' ? (
+                <div className="space-y-1.5">
+                  <label className={ui.label}>Contact Group</label>
+
+                  <select
+                    value={selectedGroupId}
+                    onChange={(e) => setSelectedGroupId(e.target.value)}
+                    className={`${ui.select} transition focus:ring-4 focus:ring-blue-100`}
+                    disabled={groupsLoading}
+                  >
+                    <option value="">
+                      {groupsLoading ? 'Loading groups...' : 'Select group'}
+                    </option>
+
+                    {contactGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name} ({group.contacts?.length ?? 0} contacts)
+                      </option>
+                    ))}
+                  </select>
+
+                  {selectedGroup ? (
+                    <p className="text-xs leading-5 text-slate-400">
+                      This will send to {selectedGroupRecipientCount} active
+                      contact
+                      {selectedGroupRecipientCount === 1 ? '' : 's'} in{' '}
+                      <span className="font-semibold">
+                        {selectedGroup.name}
+                      </span>
+                      .
+                    </p>
+                  ) : (
+                    <p className="text-xs leading-5 text-slate-400">
+                      Choose a saved contact group. You can manage groups from
+                      the Groups page.
+                    </p>
+                  )}
+                </div>
+              ) : null}
 
               <div className="space-y-1.5">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -287,35 +555,65 @@ export default function NewMessagePage() {
             <p className="text-sm font-bold text-slate-900">Message Summary</p>
 
             <div className="mt-4 space-y-3 text-sm">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-slate-500">Mode</span>
-                <span className="font-semibold text-slate-900">
-                  {sendMode === 'schedule' ? 'Scheduled' : 'Immediate'}
-                </span>
-              </div>
+              <SummaryRow
+                label="Mode"
+                value={sendMode === 'schedule' ? 'Scheduled' : 'Immediate'}
+              />
 
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-slate-500">Characters</span>
-                <span className="font-semibold text-slate-900">
-                  {characterCount}
-                </span>
-              </div>
+              <SummaryRow
+                label="Target"
+                value={
+                  targetMode === 'single'
+                    ? 'Single number'
+                    : targetMode === 'multiple'
+                      ? 'Multiple numbers'
+                      : 'Contact group'
+                }
+              />
 
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-slate-500">Estimated segments</span>
-                <span className="font-semibold text-slate-900">
-                  {estimatedSegments}
-                </span>
-              </div>
+              <SummaryRow label="Characters" value={characterCount} />
 
-              <div className="flex items-center justify-between gap-3">
-                <span className="shrink-0 text-slate-500">Recipient</span>
-                <span className="min-w-0 truncate text-right font-semibold text-slate-900">
-                  {recipient || 'Not set'}
-                </span>
-              </div>
+              <SummaryRow
+                label="Estimated segments"
+                value={estimatedSegments}
+              />
+
+              <SummaryRow
+                label="Recipients"
+                value={estimatedRecipientCount || 'Not set'}
+              />
+
+              {estimatedRecipientCount > 0 ? (
+                <SummaryRow
+                  label="Estimated SMS usage"
+                  value={estimatedTotalSegments || estimatedRecipientCount}
+                />
+              ) : null}
+
+              {targetMode === 'single' ? (
+                <SummaryRow label="Recipient" value={recipient || 'Not set'} />
+              ) : null}
+
+              {targetMode === 'group' ? (
+                <SummaryRow
+                  label="Group"
+                  value={selectedGroup?.name || 'Not set'}
+                />
+              ) : null}
             </div>
           </div>
+
+          {isBulkMode ? (
+            <div className="rounded-2xl border border-yellow-100 bg-yellow-50 p-5">
+              <p className="text-sm font-bold text-yellow-900">
+                Bulk SMS behavior
+              </p>
+              <p className="mt-2 text-sm leading-6 text-yellow-800">
+                Bulk SMS creates one message per recipient. Each recipient gets
+                separate delivery tracking, retry status, and quota usage.
+              </p>
+            </div>
+          ) : null}
 
           <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-5">
             <p className="text-sm font-bold text-emerald-900">
@@ -351,6 +649,56 @@ export default function NewMessagePage() {
           </div>
         </aside>
       </div>
+    </div>
+  );
+}
+
+function TargetModeButton({
+  active,
+  title,
+  description,
+  onClick,
+}: {
+  active: boolean;
+  title: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-2xl border px-4 py-3 text-left transition ${
+        active
+          ? 'border-blue-200 bg-blue-50 ring-2 ring-blue-100'
+          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+      }`}
+    >
+      <p
+        className={`text-sm font-black ${
+          active ? 'text-blue-700' : 'text-slate-900'
+        }`}
+      >
+        {title}
+      </p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>
+    </button>
+  );
+}
+
+function SummaryRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="shrink-0 text-slate-500">{label}</span>
+      <span className="min-w-0 truncate text-right font-semibold text-slate-900">
+        {value}
+      </span>
     </div>
   );
 }
