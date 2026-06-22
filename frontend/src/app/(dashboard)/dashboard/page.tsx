@@ -357,10 +357,10 @@ function PlatformDashboard({
         <AlertCard
           tone="danger"
           icon={AlertOctagon}
-          title="Dead-letter messages need attention"
-          description={`${traffic.deadLetterMessages} platform message${
-            traffic.deadLetterMessages > 1 ? 's are' : ' is'
-          } in dead-letter status. Review provider issues and retry delivery.`}
+          title="Some platform messages could not be delivered"
+          description={`${traffic.deadLetterMessages} message${
+            traffic.deadLetterMessages > 1 ? 's have' : ' has'
+          } failed permanently. Check provider errors, fix the issue, then retry or resend the affected messages.`}
         />
       ) : null}
 
@@ -374,9 +374,9 @@ function PlatformDashboard({
 
         <CompanyListPanel
           title="Companies Near Quota Limit"
-          subtitle="Companies at or above 70% quota usage."
+          subtitle="Companies that have used 70% or more of their SMS credits."
           companies={stats.companiesNearQuotaLimit ?? []}
-          emptyText="No companies near quota exhaustion."
+          emptyText="No companies are close to running out of SMS credits."
           highlightRisk
         />
       </section>
@@ -496,14 +496,20 @@ function TenantDashboard({
           tone={usagePercent >= 90 ? 'danger' : 'warning'}
           icon={AlertTriangle}
           title={
-            usagePercent >= 90
-              ? 'Quota is almost exhausted'
-              : 'Quota usage is getting high'
+            usagePercent >= 100
+              ? 'SMS balance is exhausted'
+              : usagePercent >= 90
+                ? 'SMS balance is almost exhausted'
+                : 'SMS balance is running low'
           }
           description={
             isUser
-              ? `Your company has used ${usagePercent}% of its SMS quota. Contact an admin if sending becomes limited.`
-              : `You have used ${usagePercent}% of your SMS quota. Consider upgrading the subscription plan.`
+              ? usagePercent >= 100
+                ? 'Your company has used all available SMS credits. Please contact an admin to add more credits before sending more messages.'
+                : `Your company has used ${usagePercent}% of its SMS quota. Please contact an admin to request more SMS credits before sending is interrupted.`
+              : usagePercent >= 100
+                ? 'This company has used all available SMS credits. Add more SMS credits or upgrade the plan before sending more messages.'
+                : `This company has used ${usagePercent}% of its SMS quota. Add more SMS credits or upgrade the plan to avoid service interruption.`
           }
         />
       ) : null}
@@ -512,10 +518,10 @@ function TenantDashboard({
         <AlertCard
           tone="danger"
           icon={AlertOctagon}
-          title="Dead-letter messages need attention"
+          title="Some messages could not be delivered"
           description={`${traffic?.deadLetterMessages} message${
-            (traffic?.deadLetterMessages ?? 0) > 1 ? 's are' : ' is'
-          } in dead-letter status. Review and retry failed deliveries.`}
+            (traffic?.deadLetterMessages ?? 0) > 1 ? 's have' : ' has'
+          } failed permanently. Review the failed messages, fix the issue, then retry or resend them.`}
         />
       ) : null}
 
@@ -529,7 +535,7 @@ function TenantDashboard({
 
       <RecentMessagesPanel
         title="Recent Messages"
-        subtitle="Latest SMS activity from this tenant."
+        subtitle="Latest SMS activity for this company."
         messages={stats.recentMessages}
       />
     </div>

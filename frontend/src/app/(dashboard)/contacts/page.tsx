@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import { ui } from '@/lib/ui';
@@ -28,6 +28,30 @@ type ContactsResponse = {
   };
 };
 
+type TokenPayload = {
+  sub: string;
+  email: string;
+  role: string;
+  tenantId: string;
+  iat?: number;
+  exp?: number;
+};
+
+function decodeJwtPayload(token: string): TokenPayload | null {
+  try {
+    const payload = token.split('.')[1];
+
+    if (!payload) return null;
+
+    const normalizedPayload = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const decodedPayload = JSON.parse(atob(normalizedPayload)) as TokenPayload;
+
+    return decodedPayload;
+  } catch {
+    return null;
+  }
+}
+
 export default function ContactsPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [phone, setPhone] = useState('');
@@ -42,6 +66,12 @@ export default function ContactsPage() {
   const [pageLoading, setPageLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [currentRole, setCurrentRole] = useState<string>('');
+
+  const canImportCsv = useMemo(
+    () => ['admin', 'super_admin'].includes(currentRole),
+    [currentRole],
+  );
 
   async function loadContacts(searchValue = '') {
     const token = getToken();
@@ -50,6 +80,9 @@ export default function ContactsPage() {
       window.location.href = '/login';
       return;
     }
+
+    const payload = decodeJwtPayload(token);
+    setCurrentRole(payload?.role || '');
 
     try {
       setError('');
@@ -148,6 +181,11 @@ export default function ContactsPage() {
       return;
     }
 
+    if (!canImportCsv) {
+      toast.error('Only admins can import contacts from CSV');
+      return;
+    }
+
     if (!csvFile) {
       toast.error('Please choose a CSV file');
       return;
@@ -230,7 +268,7 @@ export default function ContactsPage() {
         <div className="border-b border-slate-100 bg-gradient-to-r from-slate-950 to-slate-800 px-4 py-5 text-white sm:px-6">
           <h2 className="text-2xl font-bold">Create Contact</h2>
           <p className="mt-1 text-sm leading-6 text-slate-300">
-            Add individual contacts for direct messaging and campaigns.
+            Add individual contacts for direct messaging and bulk SMS sending.
           </p>
         </div>
 
@@ -294,42 +332,44 @@ export default function ContactsPage() {
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 px-4 py-5 sm:px-6">
-          <h2 className={ui.sectionTitle}>Import Contacts CSV</h2>
-          <p className={`${ui.sectionSubtitle} leading-6`}>
-            Bulk import contacts using a CSV file with phone, firstName,
-            lastName, and email columns.
-          </p>
-        </div>
+      {canImportCsv ? (
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-4 py-5 sm:px-6">
+            <h2 className={ui.sectionTitle}>Import Contacts CSV</h2>
+            <p className={`${ui.sectionSubtitle} leading-6`}>
+              Bulk import company contacts using a CSV file with phone,
+              firstName, lastName, and email columns.
+            </p>
+          </div>
 
-        <div className="p-4 sm:p-6">
-          <form onSubmit={handleCsvImport} className="space-y-4">
-            <div className="space-y-1.5">
-              <label className={ui.label}>CSV File</label>
-              <input
-                type="file"
-                accept=".csv"
-                onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
-                className={`${ui.input} file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-slate-700 hover:file:bg-slate-200`}
-              />
-              {csvFile ? (
-                <p className="break-words text-xs text-slate-500">
-                  Selected: {csvFile.name}
-                </p>
-              ) : null}
-            </div>
+          <div className="p-4 sm:p-6">
+            <form onSubmit={handleCsvImport} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className={ui.label}>CSV File</label>
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
+                  className={`${ui.input} file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-slate-700 hover:file:bg-slate-200`}
+                />
+                {csvFile ? (
+                  <p className="break-words text-xs text-slate-500">
+                    Selected: {csvFile.name}
+                  </p>
+                ) : null}
+              </div>
 
-            <button
-              type="submit"
-              disabled={importLoading || !csvFile}
-              className={`${ui.secondaryButton} w-full justify-center sm:w-auto`}
-            >
-              {importLoading ? 'Importing...' : 'Import CSV'}
-            </button>
-          </form>
+              <button
+                type="submit"
+                disabled={importLoading || !csvFile}
+                className={`${ui.secondaryButton} w-full justify-center sm:w-auto`}
+              >
+                {importLoading ? 'Importing...' : 'Import CSV'}
+              </button>
+            </form>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-5 sm:px-6">
@@ -337,7 +377,9 @@ export default function ContactsPage() {
             <div className="min-w-0">
               <h2 className={ui.sectionTitle}>Contacts</h2>
               <p className={ui.sectionSubtitle}>
-                Search and manage your tenant contact list.
+                {canImportCsv
+                  ? 'Search and manage company contacts for this tenant.'
+                  : 'Search and manage your personal contact list.'}
               </p>
             </div>
 
@@ -369,7 +411,7 @@ export default function ContactsPage() {
             </div>
           ) : contacts.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 py-12 text-center text-slate-500">
-              No contacts found.
+              No contacts found. Create your first contact above.
             </div>
           ) : (
             <div className="space-y-3">

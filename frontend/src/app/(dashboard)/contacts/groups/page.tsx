@@ -227,6 +227,16 @@ export default function ContactGroupsPage() {
     );
   }
 
+  const selectedGroup = groups.find((group) => group.id === selectedGroupId);
+
+  const selectedGroupContactIds = new Set(
+    selectedGroup?.contacts.map((contact) => contact.id) ?? [],
+  );
+
+  const availableContacts = contacts.filter(
+    (contact) => !selectedGroupContactIds.has(contact.id),
+  );
+
   return (
     <div className={ui.page}>
       {error ? <div className={ui.alertError}>{error}</div> : null}
@@ -236,7 +246,7 @@ export default function ContactGroupsPage() {
         <div className="border-b border-slate-100 bg-gradient-to-r from-slate-950 to-slate-800 px-4 py-5 text-white sm:px-6">
           <h2 className="text-2xl font-bold">Create Contact Group</h2>
           <p className="mt-1 text-sm leading-6 text-slate-300">
-            Organize contacts into reusable segments for campaigns.
+            Organize contacts into reusable groups for bulk SMS sending.
           </p>
         </div>
 
@@ -284,7 +294,7 @@ export default function ContactGroupsPage() {
         <div className="border-b border-slate-100 px-4 py-5 sm:px-6">
           <h2 className={ui.sectionTitle}>Add Contacts to Group</h2>
           <p className={ui.sectionSubtitle}>
-            Select a group and add one or more contacts to it.
+            Choose a group and add contacts you want to message together.
           </p>
         </div>
 
@@ -311,13 +321,13 @@ export default function ContactGroupsPage() {
                 Select Contacts
               </label>
 
-              {contacts.length === 0 ? (
+              {availableContacts.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 py-10 text-center text-sm text-slate-500">
                   No contacts available.
                 </div>
               ) : (
                 <div className="max-h-72 space-y-2 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                  {contacts.map((contact) => {
+                  {availableContacts.map((contact) => {
                     const checked = selectedContactIds.includes(contact.id);
 
                     return (
@@ -371,7 +381,7 @@ export default function ContactGroupsPage() {
         <div className="border-b border-slate-100 px-4 py-5 sm:px-6">
           <h2 className={ui.sectionTitle}>Contact Groups</h2>
           <p className={ui.sectionSubtitle}>
-            View group membership and remove contacts when needed.
+            View each group's contacts and remove members when needed.
           </p>
         </div>
 
@@ -420,7 +430,7 @@ export default function ContactGroupsPage() {
 
                   {group.contacts.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 py-6 text-center text-sm text-slate-500">
-                      No contacts in this group.
+                      No contacts in this group yet.
                     </div>
                   ) : (
                     <div className="space-y-2">

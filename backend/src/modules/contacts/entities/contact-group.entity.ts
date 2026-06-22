@@ -8,7 +8,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { Contact } from '../../contacts/entities/contact.entity';
+import { Contact } from './contact.entity';
 
 @Entity('contact_groups')
 export class ContactGroup {
@@ -18,6 +18,10 @@ export class ContactGroup {
   @Index()
   @Column()
   tenantId!: string;
+
+  @Index()
+  @Column({ nullable: true })
+  createdByUserId?: string;
 
   @Column()
   name!: string;

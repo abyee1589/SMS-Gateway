@@ -2,6 +2,7 @@ import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
+import { ScheduleModule } from '@nestjs/schedule';
 
 import { validateEnv } from './config/env.validation';
 import databaseConfig from './config/db.config';
@@ -11,15 +12,18 @@ import { UsersModule } from './modules/users/users.module';
 import { SmsModule } from './modules/sms/sms.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
-import { DashboardModule } from './modules/dashboard/dashboard.module'; 
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
-import { ContactGroupsModule } from './modules/contact-groups/contact-groups.module';
+import { ContactGroupsModule } from './modules/contacts/contact-groups/contact-groups.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { HealthModule } from './modules/health/health.module';
+import { SubscriptionPlansModule } from './modules/subscription-plans/subscription-plans.module';
+import { BillingModule } from './modules/billing/billing.module';
+
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware';
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware';
-import { SubscriptionPlansModule } from './modules/subscription-plans/subscription-plans.module';
+
 
 @Module({
   imports: [
@@ -29,6 +33,8 @@ import { SubscriptionPlansModule } from './modules/subscription-plans/subscripti
       validate: validateEnv,
       envFilePath: '.env',
     }),
+
+    ScheduleModule.forRoot(),
 
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
@@ -65,10 +71,13 @@ import { SubscriptionPlansModule } from './modules/subscription-plans/subscripti
     AuditLogsModule,
     HealthModule,
     SubscriptionPlansModule,
+    BillingModule,
   ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(RequestContextMiddleware, RequestLoggerMiddleware).forRoutes('*');
+    consumer
+      .apply(RequestContextMiddleware, RequestLoggerMiddleware)
+      .forRoutes('*');
   }
 }

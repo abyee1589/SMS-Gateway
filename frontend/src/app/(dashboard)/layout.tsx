@@ -48,7 +48,7 @@ const sidebarIcons: Record<string, SidebarIcon> = {
   '/messages': IconMessage2,
   '/contacts': IconAddressBook,
   '/campaigns': IconSpeakerphone,
-  '/contact-groups': IconUsersGroup,
+  '/contacts/groups': IconUsersGroup,
   '/users': IconUsers,
   '/audit-logs': IconClipboardList,
   '/billing': IconCreditCard,
@@ -439,14 +439,14 @@ export default function DashboardLayout({
                 <IconMenu2 size={18} stroke={2} />
               </button>
 
-              <div className="min-w-0">
+              {/* <div className="min-w-0">
                 <h1 className="truncate text-lg font-bold text-gray-900 sm:text-2xl">
                   NexusMsg Dashboard
                 </h1>
                 <p className="mt-0.5 hidden truncate text-sm text-gray-500 sm:block">
                   Manage campaigns, contacts, delivery, and users.
                 </p>
-              </div>
+              </div> */}
             </div>
 
             <div ref={profileRef} className="relative shrink-0">

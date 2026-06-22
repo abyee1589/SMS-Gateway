@@ -197,9 +197,17 @@ export class DashboardService {
           smsUsed: tenant.smsUsed,
           remainingSms,
           usagePercent,
+          quotaStatus:
+            usagePercent >= 100
+              ? 'exhausted'
+              : usagePercent >= 95
+                ? 'critical'
+                : usagePercent >= 75
+                  ? 'low'
+                  : 'normal',
         };
       })
-      .filter((tenant) => tenant.usagePercent >= 70)
+      .filter((tenant) => tenant.usagePercent >= 75)
       .sort((a, b) => b.usagePercent - a.usagePercent)
       .slice(0, 10);
 

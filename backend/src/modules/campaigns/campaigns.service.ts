@@ -12,7 +12,7 @@ import { Campaign, CampaignStatus } from './entities/campaign.entity';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { QueryCampaignsDto } from './dto/query-campaigns.dto';
 import { Contact } from '../contacts/entities/contact.entity';
-import { ContactGroup } from '../contact-groups/entities/contact-group.entity';
+import { ContactGroup } from '../contacts/entities/contact-group.entity';
 import { TenantsService } from '../tenants/tenants.service';
 import {
   CAMPAIGN_JOB_PROCESS,

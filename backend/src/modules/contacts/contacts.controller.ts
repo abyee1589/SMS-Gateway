@@ -8,6 +8,7 @@ import {
   Req,
   UseGuards,
   BadRequestException,
+  ForbiddenException,
   UploadedFile,
   UseInterceptors,
   Logger,
@@ -84,6 +85,9 @@ export class ContactsController {
     @UploadedFile() file: Express.Multer.File,
     @Req() req: { user: CurrentUser },
   ) {
+    if (!['admin', 'super_admin'].includes(req.user.role)) {
+      throw new ForbiddenException('Only admins can import contacts from CSV');
+    }
     if (!file) {
       throw new BadRequestException('CSV file is required');
     }

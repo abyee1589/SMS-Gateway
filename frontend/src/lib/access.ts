@@ -59,17 +59,23 @@ export const navItems: NavItem[] = [
     href: '/contacts',
     label: 'Contacts',
     roles: ['super_admin', 'admin', 'user'],
+    children: [
+      {
+        href: '/contacts',
+        label: 'All Contacts',
+        roles: ['super_admin', 'admin', 'user'],
+      },
+      {
+        href: '/contacts/groups',
+        label: 'Groups',
+        roles: ['super_admin', 'admin', 'user'],
+      },
+    ],
   },
 
   {
     href: '/campaigns',
     label: 'Campaigns',
-    roles: ['super_admin', 'admin', 'user'],
-  },
-
-  {
-    href: '/contact-groups',
-    label: 'Groups',
     roles: ['super_admin', 'admin', 'user'],
   },
 
@@ -95,19 +101,21 @@ export function canAccess(
   return roles.includes(role.toLowerCase() as UserRole);
 }
 
-export function getAllowedRolesForPath(
-  pathname: string,
-): UserRole[] {
+export function getAllowedRolesForPath(pathname: string): UserRole[] {
   const flatItems = navItems.flatMap((item) => [
-    item,
     ...(item.children ?? []),
+    item,
   ]);
 
-  const item = flatItems.find(
-    (nav) =>
-      pathname === nav.href ||
-      pathname.startsWith(`${nav.href}/`),
+  const exactMatch = flatItems.find((nav) => pathname === nav.href);
+
+  if (exactMatch) {
+    return exactMatch.roles;
+  }
+
+  const sectionMatch = flatItems.find((nav) =>
+    pathname.startsWith(`${nav.href}/`),
   );
 
-  return item?.roles ?? ['super_admin', 'admin', 'user'];
+  return sectionMatch?.roles ?? ['super_admin', 'admin', 'user'];
 }

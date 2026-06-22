@@ -7,7 +7,7 @@ import { SmsController } from './sms.controller';
 import { SmsWebhookController } from './sms-webhook.controller';
 import { SmsMessage } from './entities/sms.entity';
 import { Contact } from '../contacts/entities/contact.entity';
-import { ContactGroup } from '../contact-groups/entities/contact-group.entity';import { SmsProcessor } from './sms.processor';
+import { ContactGroup } from '../contacts/entities/contact-group.entity';import { SmsProcessor } from './sms.processor';
 import { SMS_QUEUE } from './constants/sms.constants';
 import { SmsProviderFactory } from './providers/sms-provider.factory';
 import { AfricasTalkingSmsProvider } from './providers/africastalking-sms.provider';

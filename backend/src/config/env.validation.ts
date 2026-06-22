@@ -17,7 +17,7 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string(),
 
   SMS_PROVIDER: z.string(),
-  
+
   AT_APP_USERNAME: z.string().optional(),
   AT_APP_API_KEY: z.string().optional(),
   AT_SENDER_ID: z.string().optional(),
@@ -28,6 +28,16 @@ const envSchema = z.object({
   ZERGAW_SMS_PASSWORD: z.string().optional(),
 
   SMS_WEBHOOK_SECRET: z.string(),
+
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().optional().default(587),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  MAIL_FROM: z.string().optional(),
+
+  SMS_USAGE_REMINDER_PERCENT: z.coerce.number().optional().default(75),
+  SMS_USAGE_CRITICAL_PERCENT: z.coerce.number().optional().default(95),
+  SMS_USAGE_EXHAUSTED_PERCENT: z.coerce.number().optional().default(100),
 });
 
 export const validateEnv = (config: Record<string, unknown>) => {

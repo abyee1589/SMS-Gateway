@@ -21,7 +21,7 @@ import {
 } from './constants/sms.constants';
 import { TenantsService } from '../tenants/tenants.service';
 import { Contact } from '../contacts/entities/contact.entity';
-import { ContactGroup } from '../contact-groups/entities/contact-group.entity';
+import { ContactGroup } from '../contacts/entities/contact-group.entity';
 import { CreateBulkMessageDto } from './dto/create-bulk-message.dto';
 
 

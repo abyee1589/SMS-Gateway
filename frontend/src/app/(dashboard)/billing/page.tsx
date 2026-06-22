@@ -202,31 +202,34 @@ export default function BillingPage() {
         </div>
       </section>
 
-      {usagePercent >= 70 ? (
-        <div
-          className={`rounded-2xl border px-4 py-4 sm:px-5 ${
-            usagePercent >= 90
-              ? 'border-red-200 bg-red-50 text-red-700'
-              : 'border-yellow-200 bg-yellow-50 text-yellow-800'
-          }`}
-        >
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-            <div className="min-w-0">
-              <p className="font-black">
-                {usagePercent >= 90
-                  ? 'SMS credits are almost exhausted'
-                  : 'SMS credit usage is getting high'}
-              </p>
-              <p className="mt-1 text-sm leading-6">
-                Your company has used {usagePercent}% of its SMS credits.
-                Contact Zergaw support or your account manager to purchase more
-                credits.
-              </p>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {usagePercent >= 75 ? (
+  <div
+    className={`rounded-2xl border px-4 py-4 sm:px-5 ${
+      usagePercent >= 95
+        ? 'border-red-200 bg-red-50 text-red-700'
+        : 'border-yellow-200 bg-yellow-50 text-yellow-800'
+    }`}
+  >
+    <div className="flex items-start gap-3">
+      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+      <div className="min-w-0">
+        <p className="font-black">
+          {usagePercent >= 100
+            ? 'SMS credits are exhausted'
+            : usagePercent >= 95
+              ? 'SMS credits are critically low'
+              : 'SMS credits are running low'}
+        </p>
+
+        <p className="mt-1 text-sm leading-6">
+          {usagePercent >= 100
+            ? 'Your company has used all available SMS credits. Purchase more credits before sending additional messages.'
+            : `Your company has used ${usagePercent}% of its SMS credits. Purchase more credits before sending is interrupted.`}
+        </p>
+      </div>
+    </div>
+  </div>
+) : null}
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
@@ -511,8 +514,8 @@ function formatTransactionType(type: QuotaTransaction['type']) {
 }
 
 function getUsageBarColor(usagePercent: number) {
-  if (usagePercent >= 90) return 'bg-red-400';
-  if (usagePercent >= 70) return 'bg-yellow-400';
+  if (usagePercent >= 95) return 'bg-red-400';
+  if (usagePercent >= 75) return 'bg-yellow-400';
   return 'bg-blue-400';
 }
 

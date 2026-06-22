@@ -8,24 +8,31 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { ContactGroupsService } from './contact-groups.service';
-import { CreateContactGroupDto } from './dto/create-contact-group.dto';
-import { UpdateContactGroupMembersDto } from './dto/update-contact-group-members.dto';
-import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { CreateContactGroupDto } from '../dto/create-contact-group.dto';
+import { UpdateContactGroupMembersDto } from '../dto/update-contact-group-members.dto';
+import { AuditLogsService } from '../../audit-logs/audit-logs.service';
+
+type CurrentUser = {
+  id: string;
+  email: string;
+  tenantId: string;
+  role: string;
+};
 
 @Controller('contact-groups')
 @UseGuards(JwtAuthGuard)
 export class ContactGroupsController {
   constructor(
     private readonly contactGroupsService: ContactGroupsService,
-    private readonly auditLogsService: AuditLogsService
+    private readonly auditLogsService: AuditLogsService,
   ) {}
 
   @Post()
   async create(
     @Body() dto: CreateContactGroupDto,
-    @Req() req: { user: { id: string; email: string; tenantId: string } },
+    @Req() req: { user: CurrentUser },
   ) {
     const group = await this.contactGroupsService.create(dto, req.user);
 
@@ -46,27 +53,24 @@ export class ContactGroupsController {
   }
 
   @Get()
-  findAll(@Req() req: { user: { tenantId: string } }) {
-    return this.contactGroupsService.findAll(req.user.tenantId);
+  findAll(@Req() req: { user: CurrentUser }) {
+    return this.contactGroupsService.findAll(req.user);
   }
 
   @Get(':id')
-  findOne(
-    @Param('id') id: string,
-    @Req() req: { user: { tenantId: string } },
-  ) {
-    return this.contactGroupsService.findOne(id, req.user.tenantId);
+  findOne(@Param('id') id: string, @Req() req: { user: CurrentUser }) {
+    return this.contactGroupsService.findOne(id, req.user);
   }
 
   @Patch(':id/members')
   async addMembers(
     @Param('id') id: string,
     @Body() dto: UpdateContactGroupMembersDto,
-    @Req() req: { user: { id: string; email: string; tenantId: string } },
+    @Req() req: { user: CurrentUser },
   ) {
     const group = await this.contactGroupsService.addMembers(
       id,
-      req.user.tenantId,
+      req.user,
       dto.contactIds,
     );
 
@@ -90,11 +94,11 @@ export class ContactGroupsController {
   async removeMembers(
     @Param('id') id: string,
     @Body() dto: UpdateContactGroupMembersDto,
-    @Req() req: { user: { id: string; email: string; tenantId: string } },
+    @Req() req: { user: CurrentUser },
   ) {
     const group = await this.contactGroupsService.removeMembers(
       id,
-      req.user.tenantId,
+      req.user,
       dto.contactIds,
     );
 

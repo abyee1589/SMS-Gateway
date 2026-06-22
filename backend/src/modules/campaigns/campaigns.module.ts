@@ -9,7 +9,7 @@ import { SmsModule } from '../sms/sms.module';
 import { TenantsModule } from '../tenants/tenants.module';
 import { CampaignsProcessor } from './campaigns.processor';
 import { CAMPAIGN_QUEUE } from './constants/campaign.constants';
-import { ContactGroup } from '../contact-groups/entities/contact-group.entity';
+import { ContactGroup } from '../contacts/entities/contact-group.entity';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 
 @Module({
