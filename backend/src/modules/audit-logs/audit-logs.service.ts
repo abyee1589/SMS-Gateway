@@ -13,6 +13,13 @@ type CreateAuditLogInput = {
   metadata?: Record<string, unknown>;
 };
 
+type CurrentUser = {
+  id: string;
+  email: string;
+  role: string;
+  tenantId: string;
+};
+
 @Injectable()
 export class AuditLogsService {
   constructor(
@@ -34,9 +41,16 @@ export class AuditLogsService {
     return this.auditLogsRepository.save(log);
   }
 
-  async findAll(tenantId: string) {
+  async findAll(currentUser: CurrentUser) {
+    const where =
+      currentUser.role === 'super_admin'
+        ? {}
+        : {
+            tenantId: currentUser.tenantId,
+          };
+
     return this.auditLogsRepository.find({
-      where: { tenantId },
+      where,
       order: { createdAt: 'DESC' },
       take: 100,
     });

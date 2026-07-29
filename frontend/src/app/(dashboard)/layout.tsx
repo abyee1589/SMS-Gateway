@@ -26,6 +26,8 @@ import {
   IconX,
   IconCreditCard,
   IconPackages,
+  IconBell,
+  IconCheck,
 } from '@tabler/icons-react';
 
 
@@ -33,6 +35,28 @@ type CurrentUser = {
   id: string;
   email: string;
   role: string;
+};
+
+type NotificationItem = {
+  id: string;
+  tenantId: string;
+  userId?: string | null;
+  type: string;
+  title: string;
+  message: string;
+  status: 'unread' | 'read';
+  actionUrl?: string | null;
+  createdAt: string;
+};
+
+type NotificationsResponse = {
+  data: NotificationItem[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
 };
 
 type SidebarIcon = ComponentType<{
@@ -68,6 +92,7 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const mainRef = useRef<HTMLDivElement | null>(null);
   const profileRef = useRef<HTMLDivElement | null>(null);
+  const notificationsRef = useRef<HTMLDivElement | null>(null);
 
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -75,6 +100,10 @@ export default function DashboardLayout({
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
 
   useEffect(() => {
     async function checkAuth() {
@@ -105,21 +134,28 @@ export default function DashboardLayout({
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (!profileRef.current) return;
+      const target = event.target as Node;
 
-      if (!profileRef.current.contains(event.target as Node)) {
+      if (profileRef.current && !profileRef.current.contains(target)) {
         setProfileOpen(false);
+      }
+
+      if (
+        notificationsRef.current &&
+        !notificationsRef.current.contains(target)
+      ) {
+        setNotificationsOpen(false);
       }
     }
 
-    if (profileOpen) {
+    if (profileOpen || notificationsOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [profileOpen]);
+  }, [profileOpen, notificationsOpen]);
 
   useEffect(() => {
     const activeParent = navItems.find((item) => {
@@ -141,9 +177,23 @@ export default function DashboardLayout({
   }, [pathname]);
 
   useEffect(() => {
-    setMobileSidebarOpen(false);
-    setProfileOpen(false);
-  }, [pathname]);
+  setMobileSidebarOpen(false);
+  setProfileOpen(false);
+  setNotificationsOpen(false);
+}, [pathname]);
+
+  useEffect(() => {
+  if (!currentUser) return;
+
+  fetchNotifications();
+
+  const intervalId = window.setInterval(() => {
+    fetchNotifications();
+  }, 30000);
+
+  return () => window.clearInterval(intervalId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [currentUser?.id]);
 
   const allowedRoles = getAllowedRolesForPath(pathname);
   const hasPageAccess = canAccess(currentUser?.role, allowedRoles);
@@ -170,6 +220,99 @@ export default function DashboardLayout({
     return () => cancelAnimationFrame(id);
   }, [pathname]);
 
+  async function fetchNotifications() {
+  const token = getToken();
+
+  if (!token || !currentUser) return;
+
+  setNotificationsLoading(true);
+
+  try {
+    const [listResponse, countResponse] = await Promise.all([
+      apiFetch<NotificationsResponse>(
+        '/notifications?limit=5',
+        undefined,
+        token,
+      ),
+      apiFetch<{ count: number }>(
+        '/notifications/unread-count',
+        undefined,
+        token,
+      ),
+    ]);
+
+    setNotifications(listResponse.data);
+    setUnreadCount(countResponse.count);
+  } catch {
+    // Do not logout the user because notification loading failed.
+  } finally {
+    setNotificationsLoading(false);
+  }
+}
+
+async function markNotificationAsRead(notification: NotificationItem) {
+  const token = getToken();
+
+  if (!token) return;
+
+  try {
+    if (notification.status === 'unread') {
+      await apiFetch<NotificationItem>(
+        `/notifications/${notification.id}/read`,
+        {
+          method: 'PATCH',
+        },
+        token,
+      );
+    }
+
+    setNotificationsOpen(false);
+
+    if (notification.actionUrl) {
+      router.push(notification.actionUrl);
+    }
+
+    fetchNotifications();
+  } catch {
+    if (notification.actionUrl) {
+      router.push(notification.actionUrl);
+    }
+  }
+}
+
+async function markAllNotificationsAsRead() {
+  const token = getToken();
+
+  if (!token) return;
+
+  try {
+    await apiFetch<{ updated: number }>(
+      '/notifications/read-all',
+      {
+        method: 'PATCH',
+      },
+      token,
+    );
+
+    setNotifications((current) =>
+      current.map((notification) => ({
+        ...notification,
+        status: 'read',
+      })),
+    );
+    setUnreadCount(0);
+  } catch {
+    // Silent fail
+  }
+}
+
+function formatNotificationTime(value: string) {
+  return new Intl.DateTimeFormat('en', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value));
+}
+
   function resetScroll() {
     window.scrollTo(0, 0);
     document.documentElement.scrollTop = 0;
@@ -186,25 +329,20 @@ export default function DashboardLayout({
   }
 
   function handleParentMenuClick(href: string) {
-    resetScroll();
+  resetScroll();
 
-    const isOpen = openMenus[href];
-    const isInCurrentSection =
-      pathname === href || pathname.startsWith(`${href}/`);
+  setOpenMenus((current) => {
+    const isOpen = current[href] === true;
 
     if (isOpen) {
-      setOpenMenus({});
-      return;
+      return {};
     }
 
-    setOpenMenus({
+    return {
       [href]: true,
-    });
-
-    if (!isInCurrentSection) {
-      router.push(href);
-    }
-  }
+    };
+  });
+}
 
   function getInitials(email?: string) {
     if (!email) return 'U';
@@ -449,46 +587,149 @@ export default function DashboardLayout({
               </div> */}
             </div>
 
-            <div ref={profileRef} className="relative shrink-0">
-              <button
-                type="button"
-                onClick={() => setProfileOpen((current) => !current)}
-                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 sm:gap-3 sm:px-3"
-              >
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-xs font-bold text-white">
-                  {getInitials(currentUser?.email)}
-                </span>
+            <div className="flex items-center gap-2">
+              <div ref={notificationsRef} className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNotificationsOpen((current) => !current);
+                    setProfileOpen(false);
+                    fetchNotifications();
+                  }}
+                  className="relative inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-50"
+                  aria-label="Notifications"
+                >
+                  <IconBell size={20} stroke={2} />
 
-                <span className="hidden max-w-40 truncate lg:block">
-                  {currentUser?.email ?? 'User'}
-                </span>
+                  {unreadCount > 0 ? (
+                    <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-black text-white">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  ) : null}
+                </button>
 
-                <span className="text-xs text-slate-400">▾</span>
-              </button>
+                {notificationsOpen ? (
+                  <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+                    <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                      <div>
+                        <p className="text-sm font-black text-slate-900">
+                          Notifications
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          {unreadCount} unread
+                        </p>
+                      </div>
 
-              {profileOpen ? (
-                <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
-                  <div className="border-b border-slate-100 px-4 py-3">
-                    <p className="truncate text-sm font-bold text-slate-900">
-                      {currentUser?.email ?? 'User'}
-                    </p>
-                    <p className="mt-1 text-xs capitalize text-slate-500">
-                      {currentUser?.role ?? 'user'}
-                    </p>
+                      <button
+                        type="button"
+                        onClick={markAllNotificationsAsRead}
+                        className="inline-flex items-center gap-1 rounded-xl px-2 py-1 text-xs font-bold text-blue-600 hover:bg-blue-50"
+                      >
+                        <IconCheck size={14} stroke={2} />
+                        Mark all
+                      </button>
+                    </div>
+
+                    <div className="max-h-96 overflow-y-auto">
+                      {notificationsLoading ? (
+                        <div className="px-4 py-6 text-center text-sm font-semibold text-slate-500">
+                          Loading notifications...
+                        </div>
+                      ) : notifications.length === 0 ? (
+                        <div className="px-4 py-6 text-center text-sm font-semibold text-slate-500">
+                          No notifications yet.
+                        </div>
+                      ) : (
+                        notifications.map((notification) => (
+                          <button
+                            key={notification.id}
+                            type="button"
+                            onClick={() => markNotificationAsRead(notification)}
+                            className={`block w-full border-b border-slate-100 px-4 py-3 text-left transition last:border-b-0 hover:bg-slate-50 ${
+                              notification.status === 'unread' ? 'bg-blue-50/50' : ''
+                            }`}
+                          >
+                            <div className="flex gap-3">
+                              <span
+                                className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${
+                                  notification.status === 'unread'
+                                    ? 'bg-blue-600'
+                                    : 'bg-slate-300'
+                                }`}
+                              />
+
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-black text-slate-900">
+                                  {notification.title}
+                                </p>
+                                <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600">
+                                  {notification.message}
+                                </p>
+                                <p className="mt-1 text-[11px] font-semibold text-slate-400">
+                                  {formatNotificationTime(notification.createdAt)}
+                                </p>
+                              </div>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+
+                    <Link
+                      href="/notifications"
+                      onClick={() => setNotificationsOpen(false)}
+                      className="block border-t border-slate-100 px-4 py-3 text-center text-sm font-black text-blue-600 hover:bg-blue-50"
+                    >
+                      View all notifications
+                    </Link>
                   </div>
+                ) : null}
+              </div>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setProfileOpen(false);
-                      handleLogout();
-                    }}
-                    className="block w-full px-4 py-3 text-left text-sm font-semibold text-red-600 transition hover:bg-red-50"
-                  >
-                    Logout
-                  </button>
-                </div>
-              ) : null}
+              <div ref={profileRef} className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProfileOpen((current) => !current);
+                    setNotificationsOpen(false);
+                  }}
+                  className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 sm:gap-3 sm:px-3"
+                >
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-xs font-bold text-white">
+                    {getInitials(currentUser?.email)}
+                  </span>
+
+                  <span className="hidden max-w-40 truncate lg:block">
+                    {currentUser?.email ?? 'User'}
+                  </span>
+
+                  <span className="text-xs text-slate-400">▾</span>
+                </button>
+
+                {profileOpen ? (
+                  <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+                    <div className="border-b border-slate-100 px-4 py-3">
+                      <p className="truncate text-sm font-bold text-slate-900">
+                        {currentUser?.email ?? 'User'}
+                      </p>
+                      <p className="mt-1 text-xs capitalize text-slate-500">
+                        {currentUser?.role ?? 'user'}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileOpen(false);
+                        handleLogout();
+                      }}
+                      className="block w-full px-4 py-3 text-left text-sm font-semibold text-red-600 transition hover:bg-red-50"
+                    >
+                      Logout
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
         </header>

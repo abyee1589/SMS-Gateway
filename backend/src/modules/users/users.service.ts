@@ -1,8 +1,8 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
-  BadRequestException
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -41,38 +41,25 @@ export class UsersService {
     return this.usersRepository.save(newUser);
   }
 
-  async deleteUser(userId: string, currentUser: { id: string; tenantId: string }) {
-    const user = await this.usersRepository.findOne({
-      where: { id: userId, tenantId: currentUser.tenantId },
-    });
-
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    // prevent deleting yourself (very important)
-    if (user.id === currentUser.id) {
-      throw new BadRequestException('You cannot delete your own account');
-    }
-
-    await this.usersRepository.remove(user);
-
-    return { success: true };
-  }
-
   async findAll(tenantId: string) {
-  if (!tenantId) {
-    throw new BadRequestException('Tenant is required');
+    if (!tenantId) {
+      throw new BadRequestException('Tenant is required');
+    }
+
+    return this.usersRepository.find({
+      where: {
+        tenantId,
+        role: In([UserRole.ADMIN, UserRole.USER]),
+      },
+      order: { createdAt: 'DESC' },
+    });
   }
 
-  return this.usersRepository.find({
-    where: {
-      tenantId,
-      role: In([UserRole.ADMIN, UserRole.USER]),
-    },
-    order: { createdAt: 'DESC' },
-  });
-}
+  async findAllForPlatform() {
+    return this.usersRepository.find({
+      order: { createdAt: 'DESC' },
+    });
+  }
 
   async findById(id: string) {
     const user = await this.usersRepository.findOne({
@@ -98,10 +85,37 @@ export class UsersService {
     return user;
   }
 
+  async findByEmail(email: string, includePassword = false) {
+    return this.usersRepository.findOne({
+      where: { email: email.toLowerCase() },
+      select: includePassword
+        ? [
+            'id',
+            'email',
+            'password',
+            'role',
+            'isActive',
+            'tenantId',
+            'createdAt',
+            'updatedAt',
+          ]
+        : undefined,
+    });
+  }
+
   async updateRole(id: string, tenantId: string, role: UserRole) {
     const user = await this.findByIdWithinTenant(id, tenantId);
 
     user.role = role;
+
+    return this.usersRepository.save(user);
+  }
+
+  async updateRoleAsSuperAdmin(id: string, role: UserRole) {
+    const user = await this.findById(id);
+
+    user.role = role;
+
     return this.usersRepository.save(user);
   }
 
@@ -109,48 +123,45 @@ export class UsersService {
     const user = await this.findByIdWithinTenant(id, tenantId);
 
     user.isActive = isActive;
+
     return this.usersRepository.save(user);
   }
 
-  async findByEmail(email: string, includePassword = false) {
-    return this.usersRepository.findOne({
-      where: { email: email.toLowerCase() },
-      // If includePassword is true, explicitly select all required columns including password
-      select: includePassword 
-        ? ['id', 'email', 'password', 'role', 'isActive', 'tenantId', 'createdAt', 'updatedAt'] 
-        : undefined, // Uses default entity setup (password hidden) when false
-    });
-  }
-
-  async findAllForPlatform() {
-  return this.usersRepository.find({
-    order: { createdAt: 'DESC' },
-  });
-}
-
-async deleteUserAsSuperAdmin(userId: string, currentUserId: string) {
-  const user = await this.findById(userId);
-
-  if (user.id === currentUserId) {
-    throw new BadRequestException('You cannot delete your own account');
-  }
-
-  await this.usersRepository.remove(user);
-
-  return { success: true };
-}
-
-async updateRoleAsSuperAdmin(id: string, role: UserRole) {
-  const user = await this.findById(id);
-
-  user.role = role;
-  return this.usersRepository.save(user);
-}
-
-async updateStatusAsSuperAdmin(id: string, isActive: boolean) {
+  async updateStatusAsSuperAdmin(id: string, isActive: boolean) {
     const user = await this.findById(id);
 
     user.isActive = isActive;
+
     return this.usersRepository.save(user);
+  }
+
+  async deleteUser(userId: string, currentUser: { id: string; tenantId: string }) {
+    const user = await this.usersRepository.findOne({
+      where: { id: userId, tenantId: currentUser.tenantId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (user.id === currentUser.id) {
+      throw new BadRequestException('You cannot delete your own account');
+    }
+
+    await this.usersRepository.remove(user);
+
+    return { success: true };
+  }
+
+  async deleteUserAsSuperAdmin(userId: string, currentUserId: string) {
+    const user = await this.findById(userId);
+
+    if (user.id === currentUserId) {
+      throw new BadRequestException('You cannot delete your own account');
+    }
+
+    await this.usersRepository.remove(user);
+
+    return { success: true };
   }
 }

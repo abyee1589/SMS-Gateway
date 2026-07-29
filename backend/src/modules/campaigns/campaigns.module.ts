@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
 import { CampaignsController } from './campaigns.controller';
@@ -11,6 +11,8 @@ import { CampaignsProcessor } from './campaigns.processor';
 import { CAMPAIGN_QUEUE } from './constants/campaign.constants';
 import { ContactGroup } from '../contacts/entities/contact-group.entity';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { MessageTemplatesModule } from '../message-templates/message-templates.module';
 
 @Module({
   imports: [
@@ -18,11 +20,14 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
     BullModule.registerQueue({
       name: CAMPAIGN_QUEUE,
     }),
-    SmsModule,
+    forwardRef(() => SmsModule),
     TenantsModule,
-    AuditLogsModule
+    AuditLogsModule,
+    NotificationsModule,
+    MessageTemplatesModule,
   ],
   controllers: [CampaignsController],
   providers: [CampaignsService, CampaignsProcessor],
+  exports: [CampaignsService],
 })
 export class CampaignsModule {}

@@ -44,16 +44,59 @@ export class TenantsController {
     return this.tenantsService.getQuotaTransactions(req.user.tenantId);
   }
 
-  @Get(':id')
-  @Roles(UserRole.SUPER_ADMIN)
-  findOne(@Param('id') id: string) {
-    return this.tenantsService.findById(id);
-  }
-
   @Patch(':id')
   @Roles(UserRole.SUPER_ADMIN)
   update(@Param('id') id: string, @Body() dto: UpdateTenantDto) {
     return this.tenantsService.update(id, dto);
+  }
+
+  @Patch(':id/suspend')
+  @Roles(UserRole.SUPER_ADMIN)
+  suspendTenant(
+    @Param('id') tenantId: string,
+    @Body() dto: { reason?: string },
+    @Req() req: { user: { id: string } },
+  ) {
+    return this.tenantsService.suspendTenant(
+      tenantId,
+      dto.reason,
+      req.user.id,
+    );
+  }
+
+  @Patch(':id/reactivate')
+  @Roles(UserRole.SUPER_ADMIN)
+  reactivateTenant(
+    @Param('id') tenantId: string,
+    @Req() req: { user: { id: string } },
+  ) {
+    return this.tenantsService.reactivateTenant(tenantId, req.user.id);
+  }
+
+  @Patch(':id/expire')
+  @Roles(UserRole.SUPER_ADMIN)
+  expireTenant(
+    @Param('id') tenantId: string,
+    @Body() dto: { reason?: string },
+    @Req() req: { user: { id: string } },
+  ) {
+    return this.tenantsService.expireTenant(
+      tenantId,
+      dto.reason,
+      req.user.id,
+    );
+  }
+
+  @Get(':id/status-history')
+  @Roles(UserRole.SUPER_ADMIN)
+  getStatusHistory(@Param('id') tenantId: string) {
+    return this.tenantsService.getStatusHistory(tenantId);
+  }
+
+  @Get(':id')
+  @Roles(UserRole.SUPER_ADMIN)
+  findOne(@Param('id') id: string) {
+    return this.tenantsService.findById(id);
   }
 
   @Patch(':id/subscribe')

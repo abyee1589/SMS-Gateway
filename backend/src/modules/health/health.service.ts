@@ -4,14 +4,21 @@ import { DataSource } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { SMS_QUEUE } from '../sms/constants/sms.constants';
+import { CAMPAIGN_QUEUE } from '../campaigns/constants/campaign.constants';
+
+type HealthStatus = 'ok' | 'error';
 
 @Injectable()
 export class HealthService {
   constructor(
     @InjectDataSource()
     private readonly dataSource: DataSource,
+
     @InjectQueue(SMS_QUEUE)
     private readonly smsQueue: Queue,
+
+    @InjectQueue(CAMPAIGN_QUEUE)
+    private readonly campaignQueue: Queue,
   ) {}
 
   async getLiveness() {
@@ -19,20 +26,26 @@ export class HealthService {
       status: 'ok',
       timestamp: new Date().toISOString(),
       service: 'nexusmsg-backend',
+      uptimeSeconds: Math.round(process.uptime()),
     };
   }
 
   async getReadiness() {
     const checks = {
       database: {
-        status: 'unknown' as 'ok' | 'error',
+        status: 'unknown' as HealthStatus | 'unknown',
       },
-      redisQueue: {
-        status: 'unknown' as 'ok' | 'error',
+      smsQueue: {
+        status: 'unknown' as HealthStatus | 'unknown',
+        counts: null as Awaited<ReturnType<Queue['getJobCounts']>> | null,
+      },
+      campaignQueue: {
+        status: 'unknown' as HealthStatus | 'unknown',
+        counts: null as Awaited<ReturnType<Queue['getJobCounts']>> | null,
       },
     };
 
-    let overallStatus: 'ok' | 'error' = 'ok';
+    let overallStatus: HealthStatus = 'ok';
 
     try {
       await this.dataSource.query('SELECT 1');
@@ -43,16 +56,45 @@ export class HealthService {
     }
 
     try {
-      await this.smsQueue.getJobCounts();
-      checks.redisQueue.status = 'ok';
+      const client = await this.smsQueue.client;
+      await client.ping();
+
+      checks.smsQueue.counts = await this.smsQueue.getJobCounts(
+        'waiting',
+        'active',
+        'completed',
+        'failed',
+        'delayed',
+        'paused',
+      );
+      checks.smsQueue.status = 'ok';
     } catch {
-      checks.redisQueue.status = 'error';
+      checks.smsQueue.status = 'error';
+      overallStatus = 'error';
+    }
+
+    try {
+      const client = await this.campaignQueue.client;
+      await client.ping();
+
+      checks.campaignQueue.counts = await this.campaignQueue.getJobCounts(
+        'waiting',
+        'active',
+        'completed',
+        'failed',
+        'delayed',
+        'paused',
+      );
+      checks.campaignQueue.status = 'ok';
+    } catch {
+      checks.campaignQueue.status = 'error';
       overallStatus = 'error';
     }
 
     return {
       status: overallStatus,
       timestamp: new Date().toISOString(),
+      service: 'nexusmsg-backend',
       checks,
     };
   }
@@ -61,7 +103,6 @@ export class HealthService {
     const readiness = await this.getReadiness();
 
     return {
-      service: 'nexusmsg-backend',
       ...readiness,
     };
   }

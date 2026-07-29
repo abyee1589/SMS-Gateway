@@ -2,20 +2,20 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Logger } from '@nestjs/common';
+import { Logger, Inject, forwardRef } from '@nestjs/common';
+
 import { SmsMessage, MessageStatus } from './entities/sms.entity';
 import { TenantsService } from '../tenants/tenants.service';
-import {
-  SMS_MAX_RETRIES,
-  SMS_QUEUE,
-} from './constants/sms.constants';
+import { SMS_MAX_RETRIES, SMS_QUEUE } from './constants/sms.constants';
 import { SmsProviderFactory } from './providers/sms-provider.factory';
+import { CampaignsService } from '../campaigns/campaigns.service';
 
 interface SmsJobData {
   messageId: string;
   recipient: string;
   content: string;
   idempotencyKey?: string;
+  campaignId?: string | null;
 }
 
 @Processor(SMS_QUEUE)
@@ -25,8 +25,13 @@ export class SmsProcessor extends WorkerHost {
   constructor(
     @InjectRepository(SmsMessage)
     private readonly smsRepository: Repository<SmsMessage>,
+
     private readonly smsProviderFactory: SmsProviderFactory,
+
     private readonly tenantsService: TenantsService,
+
+    @Inject(forwardRef(() => CampaignsService))
+    private readonly campaignsService: CampaignsService,
   ) {
     super();
   }
@@ -59,6 +64,61 @@ export class SmsProcessor extends WorkerHost {
       };
     }
 
+    if (
+      message.status === MessageStatus.SENT ||
+      message.status === MessageStatus.DELIVERED
+    ) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'sms_job_skipped_already_sent',
+          messageId,
+          tenantId: message.tenantId,
+          status: message.status,
+        }),
+      );
+
+      return {
+        success: true,
+        messageId,
+        skipped: true,
+        reason: 'already_sent',
+      };
+    }
+
+    try {
+      await this.tenantsService.assertCanSendMessages(message.tenantId, 1);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Tenant cannot send messages';
+
+      await this.smsRepository.update(messageId, {
+        status: MessageStatus.DEAD_LETTER,
+        errorMessage,
+        failureType: 'quota_or_subscription',
+        deadLetteredAt: new Date(),
+      });
+
+      await this.recordCampaignFailureIfNeeded(message);
+
+      this.logger.warn(
+        JSON.stringify({
+          event: 'sms_job_blocked_by_quota_or_subscription',
+          messageId,
+          tenantId: message.tenantId,
+          errorMessage,
+          nextStatus: MessageStatus.DEAD_LETTER,
+        }),
+      );
+
+      return {
+        success: false,
+        messageId,
+        blocked: true,
+        deadLetter: true,
+        reason: errorMessage,
+      };
+    }
+
     try {
       await this.smsRepository.update(messageId, {
         status: MessageStatus.PROCESSING,
@@ -74,81 +134,72 @@ export class SmsProcessor extends WorkerHost {
       });
 
       if (providerResponse.normalizedStatus === 'failed') {
-        const retryable =
-          providerResponse.failureType === 'temporary' ||
-          providerResponse.failureType === 'rate_limit' ||
-          providerResponse.failureType === 'unknown';
+        const retryable = this.isRetryableProviderFailure(
+          providerResponse.failureType,
+        );
 
-        const nextRetryCount = (message.retryCount ?? 0) + 1;
+        const nextRetryCount = Number(message.retryCount || 0) + 1;
         const retriesExhausted = nextRetryCount >= SMS_MAX_RETRIES;
 
-        if (retryable && retriesExhausted) {
-          await this.smsRepository.update(messageId, {
-            status: MessageStatus.DEAD_LETTER,
-            providerName,
-            providerStatus: providerResponse.rawStatus,
-            providerErrorCode: providerResponse.errorCode,
-            errorMessage: providerResponse.errorMessage,
-            failureType: providerResponse.failureType,
-            retryCount: nextRetryCount,
-            deadLetteredAt: new Date(),
-          });
+        const nextStatus =
+          retryable && !retriesExhausted
+            ? MessageStatus.FAILED
+            : MessageStatus.DEAD_LETTER;
 
-          this.logger.error(
-            JSON.stringify({
-              event: 'sms_dead_letter',
-              messageId,
-              providerName,
-              tenantId: message.tenantId,
-              retryCount: nextRetryCount,
-              failureType: providerResponse.failureType ?? 'unknown',
-              providerErrorCode: providerResponse.errorCode ?? null,
-              errorMessage: providerResponse.errorMessage ?? null,
-            }),
-          );
+        const finalFailureType = retryable
+          ? retriesExhausted
+            ? 'retry_exhausted'
+            : providerResponse.failureType || 'temporary_failure'
+          : providerResponse.failureType || 'permanent_failure';
+
+        await this.smsRepository.update(messageId, {
+          status: nextStatus,
+          providerName,
+          providerStatus: providerResponse.rawStatus,
+          providerErrorCode: providerResponse.errorCode,
+          errorMessage:
+            providerResponse.errorMessage || 'SMS provider returned failure',
+          failureType: finalFailureType,
+          retryCount: nextRetryCount,
+          deadLetteredAt:
+            nextStatus === MessageStatus.DEAD_LETTER ? new Date() : undefined,
+        });
+
+        this.logger.error(
+          JSON.stringify({
+            event:
+              nextStatus === MessageStatus.DEAD_LETTER
+                ? 'sms_dead_letter'
+                : 'sms_send_failed_retryable',
+            messageId,
+            providerName,
+            providerStatus: providerResponse.rawStatus ?? null,
+            providerErrorCode: providerResponse.errorCode ?? null,
+            failureType: finalFailureType,
+            tenantId: message.tenantId,
+            retryCount: nextRetryCount,
+            maxRetries: SMS_MAX_RETRIES,
+            retryable,
+            retriesExhausted,
+            errorMessage: providerResponse.errorMessage ?? null,
+          }),
+        );
+
+        if (nextStatus === MessageStatus.DEAD_LETTER) {
+          await this.recordCampaignFailureIfNeeded(message);
 
           return {
             success: false,
             messageId,
             deadLetter: true,
+            retryable,
+            retriesExhausted,
           };
         }
 
-        await this.smsRepository.update(messageId, {
-          status: MessageStatus.FAILED,
-          providerName,
-          providerStatus: providerResponse.rawStatus,
-          providerErrorCode: providerResponse.errorCode,
-          errorMessage: providerResponse.errorMessage,
-          failureType: providerResponse.failureType,
-          retryCount: nextRetryCount,
-        });
-
-        this.logger.error(
-          JSON.stringify({
-            event: 'sms_send_failed',
-            messageId,
-            providerName,
-            providerStatus: providerResponse.rawStatus ?? null,
-            providerErrorCode: providerResponse.errorCode ?? null,
-            failureType: providerResponse.failureType ?? 'unknown',
-            tenantId: message.tenantId,
-            retryCount: (message.retryCount ?? 0) + 1,
-            errorMessage: providerResponse.errorMessage ?? null,
-          }),
+        throw new Error(
+          providerResponse.errorMessage || 'Retryable SMS provider failure',
         );
-
-        if (retryable) {
-          throw new Error(
-            providerResponse.errorMessage || 'Retryable SMS failure',
-          );
-        }
-
-        return {
-          success: false,
-          messageId,
-          retryable: false,
-        };
       }
 
       const latestBeforeSuccess = await this.smsRepository.findOne({
@@ -159,10 +210,11 @@ export class SmsProcessor extends WorkerHost {
         status: MessageStatus.SENT,
         providerMessageId: providerResponse.providerMessageId,
         providerName,
-        providerStatus: providerResponse.rawStatus,
-        providerErrorCode: providerResponse.errorCode,
-        errorMessage: undefined,
-        failureType: undefined,
+        providerStatus: providerResponse.rawStatus ?? null,
+        providerErrorCode: providerResponse.errorCode ?? null,
+        errorMessage: null,
+        failureType: null,
+        deadLetteredAt: null,
         sentAt: providerResponse.acceptedAt || new Date(),
       });
 
@@ -171,7 +223,7 @@ export class SmsProcessor extends WorkerHost {
           message.tenantId,
           1,
           messageId,
-          message.createdByUserId,
+          message.createdByUserId ?? undefined,
         );
       }
 
@@ -213,33 +265,142 @@ export class SmsProcessor extends WorkerHost {
         }, 2000);
       }
 
-      return { success: true, messageId };
+      return {
+        success: true,
+        messageId,
+      };
     } catch (error) {
       const latest = await this.smsRepository.findOne({
         where: { id: messageId },
       });
 
-      if (
-        latest &&
-        latest.status !== MessageStatus.FAILED &&
-        latest.status !== MessageStatus.DEAD_LETTER
-      ) {
-        const nextRetryCount = (latest.retryCount ?? 0) + 1;
-
-        await this.smsRepository.update(messageId, {
-          status:
-            nextRetryCount >= SMS_MAX_RETRIES
-              ? MessageStatus.DEAD_LETTER
-              : MessageStatus.FAILED,
-          errorMessage:
-            error instanceof Error ? error.message : 'Unknown send error',
-          retryCount: nextRetryCount,
-          failureType: latest.failureType || 'unknown',
-          deadLetteredAt:
-            nextRetryCount >= SMS_MAX_RETRIES ? new Date() : undefined,
-        });
+      if (!latest) {
+        throw error;
       }
+
+      if (
+        latest.status === MessageStatus.DEAD_LETTER ||
+        latest.status === MessageStatus.SENT ||
+        latest.status === MessageStatus.DELIVERED ||
+        latest.status === MessageStatus.CANCELLED
+      ) {
+        return {
+          success: latest.status === MessageStatus.SENT,
+          messageId,
+          status: latest.status,
+        };
+      }
+
+      if (latest.status === MessageStatus.FAILED) {
+        throw error;
+      }
+
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown SMS send error';
+
+      const isPermanent = this.isPermanentFailure(error);
+      const nextRetryCount = Number(latest.retryCount || 0) + 1;
+      const retriesExhausted = nextRetryCount >= SMS_MAX_RETRIES;
+
+      const nextStatus =
+        isPermanent || retriesExhausted
+          ? MessageStatus.DEAD_LETTER
+          : MessageStatus.FAILED;
+
+      const failureType = isPermanent
+        ? 'permanent_failure'
+        : retriesExhausted
+          ? 'retry_exhausted'
+          : 'temporary_failure';
+
+      await this.smsRepository.update(messageId, {
+        status: nextStatus,
+        errorMessage,
+        retryCount: nextRetryCount,
+        failureType,
+        providerStatus: undefined,
+        providerErrorCode: undefined,
+        deadLetteredAt:
+          nextStatus === MessageStatus.DEAD_LETTER ? new Date() : undefined,
+      });
+
+      this.logger.error(
+        JSON.stringify({
+          event:
+            nextStatus === MessageStatus.DEAD_LETTER
+              ? 'sms_dead_letter'
+              : 'sms_send_failed_retryable',
+          messageId,
+          tenantId: latest.tenantId,
+          recipient: latest.recipient,
+          retryCount: nextRetryCount,
+          maxRetries: SMS_MAX_RETRIES,
+          isPermanent,
+          retriesExhausted,
+          nextStatus,
+          failureType,
+          errorMessage,
+        }),
+      );
+
+      if (nextStatus === MessageStatus.DEAD_LETTER) {
+        await this.recordCampaignFailureIfNeeded(latest);
+
+        return {
+          success: false,
+          messageId,
+          deadLetter: true,
+          failureType,
+          errorMessage,
+        };
+      }
+
       throw error;
     }
+  }
+
+  private isRetryableProviderFailure(failureType?: string | null) {
+    return (
+      failureType === 'temporary' ||
+      failureType === 'rate_limit' ||
+      failureType === 'unknown' ||
+      !failureType
+    );
+  }
+
+  private isPermanentFailure(error: unknown) {
+    const message =
+      error instanceof Error
+        ? error.message.toLowerCase()
+        : String(error).toLowerCase();
+
+    const permanentPatterns = [
+      'invalid phone',
+      'invalid recipient',
+      'invalid number',
+      'bad phone',
+      'blacklisted',
+      'blocked',
+      'opted out',
+      'unsubscribed',
+      'insufficient quota',
+      'quota exceeded',
+      'tenant is suspended',
+      'tenant is expired',
+      'subscription expired',
+      'message content blocked',
+      'forbidden',
+      'unauthorized',
+    ];
+
+    return permanentPatterns.some((pattern) => message.includes(pattern));
+  }
+
+  private async recordCampaignFailureIfNeeded(message: SmsMessage) {
+    if (!message.campaignId) {
+      return;
+    }
+
+    await this.campaignsService.recordMessageFailure(message.campaignId);
   }
 }

@@ -23,6 +23,9 @@ import { BillingModule } from './modules/billing/billing.module';
 
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware';
 import { RequestLoggerMiddleware } from './common/middleware/request-logger.middleware';
+import { InboundMessagesModule } from './modules/inbound-messages/inbound-messages.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { MessageTemplatesModule } from './modules/message-templates/message-templates.module';
 
 
 @Module({
@@ -72,6 +75,9 @@ import { RequestLoggerMiddleware } from './common/middleware/request-logger.midd
     HealthModule,
     SubscriptionPlansModule,
     BillingModule,
+    InboundMessagesModule,
+    NotificationsModule,
+    MessageTemplatesModule,
   ],
 })
 export class AppModule implements NestModule {

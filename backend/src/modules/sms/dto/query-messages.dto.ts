@@ -1,6 +1,34 @@
-import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
-import { MessageStatus } from '../entities/sms.entity';
+// import { Type } from 'class-transformer';
+// import { IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
+// import { MessageStatus } from '../entities/sms.entity';
+
+// export class QueryMessagesDto {
+//   @IsOptional()
+//   @IsString()
+//   recipient?: string;
+
+//   @IsOptional()
+//   @IsEnum(MessageStatus)
+//   status?: MessageStatus;
+
+//   @IsOptional()
+//   @Type(() => Number)
+//   @IsInt()
+//   @Min(1)
+//   page?: number = 1;
+
+//   @IsOptional()
+//   @Type(() => Number)
+//   @IsInt()
+//   @Min(1)
+//   limit?: number = 20;
+
+//   @IsOptional()
+//   @IsString()
+//   search?: string;
+// }
+
+import { IsOptional, IsString } from 'class-validator';
 
 export class QueryMessagesDto {
   @IsOptional()
@@ -8,22 +36,20 @@ export class QueryMessagesDto {
   recipient?: string;
 
   @IsOptional()
-  @IsEnum(MessageStatus)
-  status?: MessageStatus;
+  @IsString()
+  status?: string;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page?: number = 1;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  limit?: number = 20;
+  @IsString()
+  statuses?: string;
 
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  page?: number;
+
+  @IsOptional()
+  limit?: number;
 }

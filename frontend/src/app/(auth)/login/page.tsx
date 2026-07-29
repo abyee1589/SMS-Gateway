@@ -76,51 +76,27 @@ export default function LoginPage() {
         <div className="absolute -bottom-24 right-0 h-80 w-80 rounded-full bg-cyan-400/10 blur-3xl" />
       </div>
 
-      <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-6xl items-center justify-center">
-        <div className="grid w-full overflow-hidden rounded-[2rem] border border-white/10 bg-white shadow-2xl lg:grid-cols-[0.9fr_1.1fr]">
-          <section className="hidden bg-gradient-to-br from-slate-950 to-slate-800 p-10 text-white lg:flex lg:flex-col lg:justify-between">
-            <div>
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-lg font-black shadow-lg">
+      <div className="relative mx-auto flex min-h-[calc(100vh-4rem)] w-full items-center justify-center px-4">
+        <div className="w-full max-w-md rounded-[2rem] bg-white/95 p-6 shadow-xl ring-1 ring-slate-200/70 backdrop-blur sm:p-8">
+          <section>
+            <div className="mb-8 flex flex-col items-center text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-600 text-xl font-black text-white shadow-lg">
                 Z
               </div>
 
-              <h1 className="mt-8 text-4xl font-black tracking-tight">
+              <h1 className="mt-5 text-3xl font-black tracking-tight text-slate-950">
                 Zergaw SMS Gateway
               </h1>
 
-              <p className="mt-4 max-w-sm text-sm leading-7 text-slate-300">
+              <p className="mt-3 max-w-sm text-sm leading-6 text-slate-500">
                 Manage SMS campaigns, contacts, delivery activity, and tenant
                 operations from one secure dashboard.
               </p>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-white/10 p-5 backdrop-blur">
-              <p className="text-sm font-semibold text-slate-200">
-                Messaging Operations Platform
-              </p>
-              <p className="mt-2 text-xs leading-6 text-slate-400">
-                Built for campaign delivery, scheduling, contact groups, and
-                audit visibility.
-              </p>
-            </div>
-          </section>
-
-          <section className="p-5 sm:p-8 lg:p-10">
-            <div className="mb-8 lg:hidden">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-lg font-black text-white shadow-lg">
-                Z
-              </div>
-              <h1 className="mt-5 text-2xl font-black tracking-tight text-slate-950">
-                Zergaw SMS Gateway
-              </h1>
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                Sign in to manage messaging operations.
-              </p>
-            </div>
-
-            <div className="mx-auto w-full max-w-md">
-              <div className="mb-6 hidden lg:block">
-                <h2 className="text-3xl font-black tracking-tight text-slate-950">
+            <div className="mx-auto w-full">
+              <div className="mb-6 text-center">
+                <h2 className="text-2xl font-black tracking-tight text-slate-950">
                   Welcome back
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-500">

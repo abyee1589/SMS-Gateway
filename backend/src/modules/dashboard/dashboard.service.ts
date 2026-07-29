@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, Repository } from 'typeorm';
+import { Between, Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { SmsMessage, MessageStatus } from '../sms/entities/sms.entity';
 import {
@@ -33,13 +33,32 @@ export class DashboardService {
   async getStats(
     currentUser: CurrentUser,
     period: DashboardPeriod = 'month',
+    selectedTenantId?: string,
   ) {
     const dateRange = this.getDateRange(period);
 
+    /**
+     * Super admin behavior:
+     * - No selectedTenantId => platform-wide dashboard
+     * - selectedTenantId => selected company dashboard
+     */
     if (currentUser.role === 'super_admin') {
+      if (selectedTenantId) {
+        return this.getSelectedCompanyStats(
+          currentUser,
+          selectedTenantId,
+          period,
+          dateRange,
+        );
+      }
+
       return this.getPlatformStats(currentUser, period, dateRange);
     }
 
+    /**
+     * Normal admin/user behavior:
+     * Always scoped to their own company.
+     */
     return this.getTenantStats(currentUser, period, dateRange);
   }
 
@@ -147,6 +166,7 @@ export class DashboardService {
     ]);
 
     const totalCompanies = tenants.length;
+
     const activeCompanies = tenants.filter(
       (tenant) => tenant.status === TenantStatus.ACTIVE,
     ).length;
@@ -182,7 +202,8 @@ export class DashboardService {
     const companiesNearQuotaLimit = tenants
       .map((tenant) => {
         const remainingSms = Math.max(0, tenant.smsQuota - tenant.smsUsed);
-        const usagePercent =
+
+        const tenantUsagePercent =
           tenant.smsQuota > 0
             ? Number(((tenant.smsUsed / tenant.smsQuota) * 100).toFixed(1))
             : 0;
@@ -196,13 +217,13 @@ export class DashboardService {
           smsQuota: tenant.smsQuota,
           smsUsed: tenant.smsUsed,
           remainingSms,
-          usagePercent,
+          usagePercent: tenantUsagePercent,
           quotaStatus:
-            usagePercent >= 100
+            tenantUsagePercent >= 100
               ? 'exhausted'
-              : usagePercent >= 95
+              : tenantUsagePercent >= 95
                 ? 'critical'
-                : usagePercent >= 75
+                : tenantUsagePercent >= 75
                   ? 'low'
                   : 'normal',
         };
@@ -281,6 +302,52 @@ export class DashboardService {
       companiesNearQuotaLimit,
       topCompaniesByUsage,
       recentMessages,
+    };
+  }
+
+  private async getSelectedCompanyStats(
+    currentUser: CurrentUser,
+    selectedTenantId: string,
+    period: DashboardPeriod,
+    dateRange: { startDate: Date; endDate: Date },
+  ) {
+    const tenant = await this.tenantsRepository.findOne({
+      where: {
+        id: selectedTenantId,
+      },
+    });
+
+    if (!tenant) {
+      throw new NotFoundException('Selected company not found');
+    }
+
+    const fakeTenantUser: CurrentUser = {
+      id: currentUser.id,
+      role: 'admin',
+      tenantId: selectedTenantId,
+    };
+
+    const tenantStats = await this.getTenantStats(
+      fakeTenantUser,
+      period,
+      dateRange,
+    );
+
+    return {
+      ...tenantStats,
+      scope: 'selected_company',
+      currentUser: {
+        id: currentUser.id,
+        role: currentUser.role,
+        tenantId: currentUser.tenantId,
+      },
+      selectedCompany: {
+        id: tenant.id,
+        name: tenant.name,
+        status: tenant.status,
+        commercialTier: tenant.commercialTier,
+        messagePriority: tenant.messagePriority,
+      },
     };
   }
 

@@ -10,6 +10,7 @@ import {
 import {
   CommercialTier,
   MessagePriority,
+  SubscriptionStatus,
   TenantStatus,
 } from '../entities/tenant.entity';
 
@@ -37,6 +38,10 @@ export class UpdateTenantDto {
   @IsOptional()
   @IsEnum(TenantStatus)
   status?: TenantStatus;
+
+  @IsOptional()
+  @IsEnum(SubscriptionStatus)
+  subscriptionStatus?: SubscriptionStatus;
 
   @IsOptional()
   @IsEnum(CommercialTier)

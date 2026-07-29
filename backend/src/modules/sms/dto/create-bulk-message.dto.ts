@@ -35,6 +35,10 @@ export class CreateBulkMessageDto {
   content!: string;
 
   @IsOptional()
+  @IsUUID('4')
+  templateId?: string;
+
+  @IsOptional()
   @IsBoolean()
   forceSend?: boolean;
 

@@ -25,8 +25,15 @@ export class SmsMessage {
   id!: string;
 
   @Index()
-  @Column()
+  @Column({ type: 'varchar' })
   tenantId!: string;
+
+  @Index()
+  @Column({ type: 'uuid', nullable: true })
+  campaignId?: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  createdByUserId?: string | null;
 
   @Column()
   recipient!: string;
@@ -41,14 +48,35 @@ export class SmsMessage {
   })
   status!: MessageStatus;
 
-  @Column({ nullable: true })
-  providerMessageId?: string;
+  @Column({ type: 'varchar', nullable: true })
+  providerMessageId?: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  providerName?: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  providerStatus?: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  providerErrorCode?: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  failureType?: string | null;
 
   @Column({ type: 'text', nullable: true })
   errorMessage?: string | null;
 
   @Column({ default: 0 })
   retryCount!: number;
+
+  @Column({ type: 'varchar', nullable: true, unique: true })
+  idempotencyKey?: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  scheduledAt?: Date | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  scheduledJobId?: string | null;
 
   @Column({ type: 'timestamp', nullable: true })
   sentAt?: Date | null;
@@ -64,27 +92,4 @@ export class SmsMessage {
 
   @UpdateDateColumn()
   updatedAt!: Date;
-    @Column({ nullable: true })
-  providerName?: string;
-
-  @Column({ type: 'varchar', nullable: true })
-  providerStatus?: string | null;
-
-  @Column({ type: 'varchar', nullable: true })
-  providerErrorCode?: string | null;
-
-  @Column({ type: 'varchar', nullable: true })
-  failureType?: string | null;
-
-  @Column({ nullable: true, unique: true })
-  idempotencyKey?: string;
-
-  @Column({ nullable: true })
-  createdByUserId?: string;
-
-  @Column({ type: 'timestamp', nullable: true })
-  scheduledAt?: Date;
-
-  @Column({ nullable: true })
-  scheduledJobId?: string;
 }

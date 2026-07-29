@@ -14,6 +14,9 @@ import { QueryCampaignsDto } from './dto/query-campaigns.dto';
 import { Contact } from '../contacts/entities/contact.entity';
 import { ContactGroup } from '../contacts/entities/contact-group.entity';
 import { TenantsService } from '../tenants/tenants.service';
+import { NotificationType } from '../notifications/entities/notification.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import { MessageTemplatesService } from '../message-templates/message-templates.service';
 import {
   CAMPAIGN_JOB_PROCESS,
   CAMPAIGN_QUEUE,
@@ -41,14 +44,36 @@ export class CampaignsService {
     private readonly campaignQueue: Queue,
 
     private readonly tenantsService: TenantsService,
+
+    private readonly notificationsService: NotificationsService,
+
+    private readonly messageTemplatesService: MessageTemplatesService,
   ) {}
 
   async create(dto: CreateCampaignDto, currentUser: CurrentUser) {
+    let campaignMessage = dto.message.trim();
+
+    if (dto.templateId) {
+      const template = await this.messageTemplatesService.findOne(
+        dto.templateId,
+        currentUser,
+      );
+
+      if (!template.isActive) {
+        throw new ForbiddenException('Message template is inactive');
+      }
+
+      campaignMessage = template.content.trim();
+    }
+
     const directContacts = dto.contactIds?.length
       ? await this.contactsRepository.find({
           where: {
             id: In(dto.contactIds),
             tenantId: currentUser.tenantId,
+            ...(currentUser.role === 'user'
+              ? { createdByUserId: currentUser.id }
+              : {}),
           },
         })
       : [];
@@ -58,6 +83,9 @@ export class CampaignsService {
           where: {
             id: In(dto.groupIds),
             tenantId: currentUser.tenantId,
+            ...(currentUser.role === 'user'
+              ? { createdByUserId: currentUser.id }
+              : {}),
           },
           relations: ['contacts'],
         })
@@ -68,9 +96,18 @@ export class CampaignsService {
     const mergedMap = new Map<string, Contact>();
 
     for (const contact of [...directContacts, ...groupContacts]) {
-      if (contact.tenantId === currentUser.tenantId) {
-        mergedMap.set(contact.id, contact);
+      if (contact.tenantId !== currentUser.tenantId) {
+        continue;
       }
+
+      if (
+        currentUser.role === 'user' &&
+        contact.createdByUserId !== currentUser.id
+      ) {
+        continue;
+      }
+
+      mergedMap.set(contact.id, contact);
     }
 
     const contacts = Array.from(mergedMap.values());
@@ -92,46 +129,29 @@ export class CampaignsService {
       );
     }
 
-    // const scheduledDate = dto.scheduledAt ? new Date(dto.scheduledAt) : null;
-
-    // const isScheduled =
-    //   scheduledDate instanceof Date &&
-    //   !Number.isNaN(scheduledDate.getTime()) &&
-    //   scheduledDate.getTime() > Date.now();
-
-    // const campaign = this.campaignsRepository.create({
-    //   tenantId: currentUser.tenantId,
-    //   createdByUserId: currentUser.id,
-    //   name: dto.name,
-    //   message: dto.message,
-    //   status: isScheduled ? CampaignStatus.SCHEDULED : CampaignStatus.PROCESSING,
-    //   totalRecipients: contacts.length,
-    //   sentCount: 0,
-    //   failedCount: 0,
-    //   scheduledAt: isScheduled ? scheduledDate : null,
-    // });
-    // 1. Change null to undefined here
-    const scheduledDate = dto.scheduledAt ? new Date(dto.scheduledAt) : undefined;
+    const scheduledDate = dto.scheduledAt
+      ? new Date(dto.scheduledAt)
+      : undefined;
 
     const isScheduled = !!(
-      scheduledDate && 
-      !Number.isNaN(scheduledDate.getTime()) && 
+      scheduledDate &&
+      !Number.isNaN(scheduledDate.getTime()) &&
       scheduledDate.getTime() > Date.now()
     );
 
     const campaign = this.campaignsRepository.create({
       tenantId: currentUser.tenantId,
       createdByUserId: currentUser.id,
-      name: dto.name,
-      message: dto.message,
-      status: isScheduled ? CampaignStatus.SCHEDULED : CampaignStatus.PROCESSING,
+      name: dto.name.trim(),
+      message: campaignMessage,
+      status: isScheduled
+        ? CampaignStatus.SCHEDULED
+        : CampaignStatus.PROCESSING,
       totalRecipients: contacts.length,
       sentCount: 0,
       failedCount: 0,
-      // 2. Use undefined instead of null
-      scheduledAt: isScheduled ? scheduledDate : undefined, 
+      scheduledAt: isScheduled ? scheduledDate : undefined,
     });
-
 
     const savedCampaign = await this.campaignsRepository.save(campaign);
 
@@ -147,7 +167,7 @@ export class CampaignsService {
         createdByUserId: currentUser.id,
         userRole: currentUser.role,
         contactIds: contacts.map((contact) => contact.id),
-        message: dto.message,
+        message: campaignMessage,
       },
       {
         delay,
@@ -244,5 +264,48 @@ export class CampaignsService {
     }
 
     return campaign;
+  }
+
+  async recordMessageFailure(campaignId: string) {
+    const campaign = await this.campaignsRepository.findOne({
+      where: {
+        id: campaignId,
+      },
+    });
+
+    if (!campaign) {
+      return;
+    }
+
+    const failedCount = Number(campaign.failedCount || 0) + 1;
+    const sentCount = Number(campaign.sentCount || 0);
+
+    await this.campaignsRepository.update(campaign.id, {
+      failedCount,
+      status: sentCount > 0 ? CampaignStatus.COMPLETED : CampaignStatus.FAILED,
+    });
+
+    await this.notificationsService.createOnce({
+      tenantId: campaign.tenantId,
+      userId: campaign.createdByUserId ?? null,
+      type: NotificationType.FAILED_CAMPAIGN,
+      title:
+        sentCount > 0
+          ? 'Campaign completed with failed recipients'
+          : 'Campaign failed',
+      message:
+        sentCount > 0
+          ? `Campaign "${campaign.name}" has failed recipient(s). Failed count: ${failedCount}.`
+          : `Campaign "${campaign.name}" has failed recipient(s). Failed count: ${failedCount}.`,
+      actionUrl: '/campaigns',
+      dedupeKey: `${campaign.id}:message-failure:${failedCount}`,
+      metadata: {
+        campaignId: campaign.id,
+        campaignName: campaign.name,
+        failedCount,
+        sentCount: campaign.sentCount,
+        totalRecipients: campaign.totalRecipients,
+      },
+    });
   }
 }

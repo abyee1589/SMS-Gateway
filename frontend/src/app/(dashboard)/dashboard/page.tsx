@@ -1,15 +1,9 @@
-'use client';
+"use client";
 
-import { useEffect, useMemo, useState } from 'react';
-import { apiFetch } from '@/lib/api';
-import { getToken } from '@/lib/auth';
-import {
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-} from 'recharts';
+import { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "@/lib/api";
+import { getToken } from "@/lib/auth";
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import {
   Activity,
   AlertOctagon,
@@ -23,9 +17,9 @@ import {
   ShieldCheck,
   Users,
   Zap,
-} from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
-import Link from 'next/link';
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import Link from "next/link";
 
 type DashboardMessage = {
   id: string;
@@ -50,14 +44,19 @@ type CompanyUsage = {
   usagePercent: number;
 };
 
+type CompanyOption = {
+  id: string;
+  name: string;
+};
+
 type DashboardStats = {
   currentUser: {
     id?: string;
     role: string;
     tenantId?: string;
   };
-  scope?: 'tenant' | 'platform';
-  period?: 'today' | 'week' | 'month' | 'year';
+  scope?: "tenant" | "platform" | "selected_company";
+  period?: "today" | "week" | "month" | "year";
   platform?: {
     totalCompanies: number;
     activeCompanies: number;
@@ -99,31 +98,49 @@ type DashboardStats = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  Sent: '#099a6a',
-  Delivered: '#22c55e',
-  Queued: '#3b82f6',
-  Failed: '#ef4444',
-  'Dead Letter': '#e11d48',
+  Sent: "#099a6a",
+  Delivered: "#22c55e",
+  Queued: "#3b82f6",
+  Failed: "#ef4444",
+  "Dead Letter": "#e11d48",
 };
 
-type DashboardPeriod = 'today' | 'week' | 'month' | 'year';
+type DashboardPeriod = "today" | "week" | "month" | "year";
+
+function formatNumber(value: number | null | undefined) {
+  return Number(value ?? 0).toLocaleString("en-US");
+}
+
+function formatMetricValue(value: string | number | null | undefined) {
+  if (typeof value === "number") {
+    return formatNumber(value);
+  }
+
+  return value ?? "0";
+}
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [period, setPeriod] = useState<DashboardPeriod>('year');
+  const [error, setError] = useState("");
+  const [period, setPeriod] = useState<DashboardPeriod>("year");
+  const [companies, setCompanies] = useState<CompanyOption[]>([]);
+  const [companiesLoading, setCompaniesLoading] = useState(false);
+  const [selectedCompanyId, setSelectedCompanyId] = useState("");
+  const [selectedCompanyStats, setSelectedCompanyStats] =
+    useState<DashboardStats | null>(null);
+  const [selectedCompanyLoading, setSelectedCompanyLoading] = useState(false);
 
   async function loadDashboard() {
     const token = getToken();
 
     if (!token) {
-      window.location.href = '/login';
+      window.location.href = "/login";
       return;
     }
 
     try {
-      setError('');
+      setError("");
 
       if (!stats) {
         setLoading(true);
@@ -138,9 +155,78 @@ export default function DashboardPage() {
       setStats(data);
     } catch (err) {
       console.error(err);
-      setError('Failed to load dashboard analytics');
+      setError("Failed to load dashboard analytics");
     } finally {
       setLoading(false);
+    }
+  }
+
+  function buildMessageBreakdown(stats: DashboardStats | null) {
+    if (!stats) return [];
+
+    return [
+      { name: "Sent", value: stats.traffic.sentMessages },
+      { name: "Delivered", value: stats.traffic.deliveredMessages },
+      { name: "Queued", value: stats.traffic.queuedMessages },
+      { name: "Failed", value: stats.traffic.failedMessages },
+      { name: "Dead Letter", value: stats.traffic.deadLetterMessages },
+    ].filter((item) => item.value > 0);
+  }
+
+  async function loadCompanies() {
+    const token = getToken();
+
+    if (!token) return;
+
+    try {
+      setCompaniesLoading(true);
+
+      const response = await apiFetch<
+        CompanyOption[] | { data?: CompanyOption[]; tenants?: CompanyOption[] }
+      >("/tenants", undefined, token);
+
+      const list = Array.isArray(response)
+        ? response
+        : (response.data ?? response.tenants ?? []);
+
+      setCompanies(
+        list
+          .filter((company) => company.id && company.name)
+          .map((company) => ({
+            id: company.id,
+            name: company.name,
+          })),
+      );
+    } catch (error) {
+      console.error("Failed to load companies", error);
+    } finally {
+      setCompaniesLoading(false);
+    }
+  }
+
+  async function loadSelectedCompanyStats(companyId: string) {
+    const token = getToken();
+
+    if (!token || !companyId) {
+      setSelectedCompanyStats(null);
+      return;
+    }
+
+    try {
+      setSelectedCompanyLoading(true);
+
+      const data = await apiFetch<DashboardStats>(
+        `/dashboard/stats?period=${period}&tenantId=${companyId}&companyId=${companyId}`,
+        undefined,
+        token,
+      );
+
+      setSelectedCompanyStats(data);
+    } catch (error) {
+      console.error("Failed to load selected company dashboard stats", error);
+      setSelectedCompanyStats(null);
+    } finally {
+      setSelectedCompanyLoading(false);
     }
   }
 
@@ -149,17 +235,28 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period]);
 
-  const messageBreakdown = useMemo(() => {
-    if (!stats) return [];
+  useEffect(() => {
+    if (stats?.scope === "platform") {
+      loadCompanies();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stats?.scope]);
 
-    return [
-      { name: 'Sent', value: stats.traffic.sentMessages },
-      { name: 'Delivered', value: stats.traffic.deliveredMessages },
-      { name: 'Queued', value: stats.traffic.queuedMessages },
-      { name: 'Failed', value: stats.traffic.failedMessages },
-      { name: 'Dead Letter', value: stats.traffic.deadLetterMessages },
-    ].filter((item) => item.value > 0);
-  }, [stats]);
+  useEffect(() => {
+    if (stats?.scope === "platform" && selectedCompanyId) {
+      loadSelectedCompanyStats(selectedCompanyId);
+    } else {
+      setSelectedCompanyStats(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stats?.scope, selectedCompanyId, period]);
+
+  const messageBreakdown = useMemo(() => buildMessageBreakdown(stats), [stats]);
+
+  const selectedCompanyMessageBreakdown = useMemo(
+    () => buildMessageBreakdown(selectedCompanyStats),
+    [selectedCompanyStats],
+  );
 
   if (loading) {
     return <DashboardSkeleton />;
@@ -168,18 +265,25 @@ export default function DashboardPage() {
   if (error || !stats) {
     return (
       <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-700">
-        {error || 'Failed to load dashboard analytics'}
+        {error || "Failed to load dashboard analytics"}
       </div>
     );
   }
 
-  if (stats.scope === 'platform') {
+  if (stats.scope === "platform") {
     return (
       <PlatformDashboard
         stats={stats}
         period={period}
         setPeriod={setPeriod}
         messageBreakdown={messageBreakdown}
+        companies={companies}
+        companiesLoading={companiesLoading}
+        selectedCompanyId={selectedCompanyId}
+        setSelectedCompanyId={setSelectedCompanyId}
+        selectedCompanyStats={selectedCompanyStats}
+        selectedCompanyLoading={selectedCompanyLoading}
+        selectedCompanyMessageBreakdown={selectedCompanyMessageBreakdown}
       />
     );
   }
@@ -199,22 +303,31 @@ function PlatformDashboard({
   period,
   setPeriod,
   messageBreakdown,
+  companies,
+  companiesLoading,
+  selectedCompanyId,
+  setSelectedCompanyId,
+  selectedCompanyStats,
+  selectedCompanyLoading,
+  selectedCompanyMessageBreakdown,
 }: {
   stats: DashboardStats;
   period: DashboardPeriod;
   setPeriod: (period: DashboardPeriod) => void;
   messageBreakdown: { name: string; value: number }[];
+  companies: CompanyOption[];
+  companiesLoading: boolean;
+  selectedCompanyId: string;
+  setSelectedCompanyId: (companyId: string) => void;
+  selectedCompanyStats: DashboardStats | null;
+  selectedCompanyLoading: boolean;
+  selectedCompanyMessageBreakdown: { name: string; value: number }[];
 }) {
   const platform = stats.platform;
-  const traffic = stats.traffic;
-  const usagePercent = platform?.usagePercent ?? 0;
+  const selectedCompany = companies.find(
+    (company) => company.id === selectedCompanyId,
+  );
 
-  const platformTrafficTotal =
-    (traffic?.sentMessages ?? 0) +
-    (traffic?.deliveredMessages ?? 0) +
-    (traffic?.queuedMessages ?? 0) +
-    (traffic?.failedMessages ?? 0) +
-    (traffic?.deadLetterMessages ?? 0);
 
   return (
     <div className="space-y-6 sm:space-y-8">
@@ -231,15 +344,15 @@ function PlatformDashboard({
               </div>
 
               <h1 className="mt-5 break-words text-3xl font-black tracking-tight sm:text-4xl lg:text-5xl">
-                {platform?.totalCompanies ?? 0}
+                {formatNumber(platform?.totalCompanies)}
                 <span className="ml-2 text-lg font-bold text-slate-300 sm:text-xl">
                   companies managed
                 </span>
               </h1>
 
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
-                Monitor tenant health, quota allocation, VIP priority handling,
-                and SMS traffic across the full NexusMsg platform.
+                Monitor company health, quota allocation, priority handling, and
+                SMS traffic across the full NexusMsg platform.
               </p>
             </div>
 
@@ -258,7 +371,7 @@ function PlatformDashboard({
         <PlatformStatCard
           title="Total Companies"
           value={platform?.totalCompanies ?? 0}
-          helper={`${platform?.activeCompanies ?? 0} active companies`}
+          helper={`${formatNumber(platform?.activeCompanies)} active companies`}
           icon={Building2}
         />
 
@@ -273,119 +386,50 @@ function PlatformDashboard({
         <PlatformStatCard
           title="Quota Allocated"
           value={platform?.totalSmsQuota ?? 0}
-          helper={`${platform?.totalRemainingSms ?? 0} SMS remaining`}
+          helper={`${formatNumber(platform?.totalRemainingSms)} SMS remaining`}
           icon={Zap}
         />
 
         <PlatformStatCard
           title="Platform Users"
           value={platform?.totalUsers ?? 0}
-          helper={`${platform?.activeUsers ?? 0} active users`}
+          helper={`${formatNumber(platform?.activeUsers)} active users`}
           icon={Users}
         />
       </section>
 
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_0.9fr]">
-        <div className="overflow-hidden rounded-[1.5rem] border border-slate-100 bg-white p-4 shadow-sm sm:p-6">
-          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="text-lg font-black text-slate-900">
-                Platform SMS Usage
-              </h3>
-              <p className="text-sm text-slate-500">
-                Total used quota across all companies.
-              </p>
-            </div>
+        <ScopeSmsUsagePanel
+          platformStats={stats}
+          selectedCompany={selectedCompany}
+          selectedCompanyStats={selectedCompanyStats}
+          selectedCompanyLoading={selectedCompanyLoading}
+        />
 
-            <span className="w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
-              {usagePercent}% used
-            </span>
-          </div>
-
-          <div className="rounded-3xl bg-slate-950 p-5 text-white">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
-                  Used / Allocated
-                </p>
-
-                <p className="mt-2 text-3xl font-black sm:text-4xl">
-                  {platform?.totalSmsUsed ?? 0}
-                  <span className="text-lg text-slate-400">
-                    {' '}
-                    / {platform?.totalSmsQuota ?? 0}
-                  </span>
-                </p>
-              </div>
-
-              <p className="text-sm text-slate-300">
-                Remaining: {platform?.totalRemainingSms ?? 0}
-              </p>
-            </div>
-
-            <div className="mt-5 h-4 overflow-hidden rounded-full bg-white/15">
-              <div
-                className={`h-full rounded-full transition-all duration-700 ease-out ${getUsageBarColor(
-                  usagePercent,
-                )}`}
-                style={{ width: `${Math.min(usagePercent, 100)}%` }}
-              />
-            </div>
-          </div>
-
-          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <MiniMetric label="Messages" value={platformTrafficTotal} />
-            <MiniMetric label="Delivered" value={traffic.deliveredMessages} />
-            <MiniMetric
-              label="Delivery Rate"
-              value={`${traffic.deliveryRate}%`}
-            />
-          </div>
-        </div>
-
-        <TrafficPanel
-          title="Platform SMS Traffic"
+        <CompanyTrafficFilterPanel
           period={period}
           setPeriod={setPeriod}
-          traffic={traffic}
-          messageBreakdown={messageBreakdown}
-          compactLinks
+          platformStats={stats}
+          globalMessageBreakdown={messageBreakdown}
+          companies={companies}
+          companiesLoading={companiesLoading}
+          selectedCompanyId={selectedCompanyId}
+          setSelectedCompanyId={setSelectedCompanyId}
+          selectedCompanyStats={selectedCompanyStats}
+          selectedCompanyLoading={selectedCompanyLoading}
+          messageBreakdown={selectedCompanyMessageBreakdown}
         />
       </section>
 
-      {(traffic.deadLetterMessages ?? 0) > 0 ? (
-        <AlertCard
-          tone="danger"
-          icon={AlertOctagon}
-          title="Some platform messages could not be delivered"
-          description={`${traffic.deadLetterMessages} message${
-            traffic.deadLetterMessages > 1 ? 's have' : ' has'
-          } failed permanently. Check provider errors, fix the issue, then retry or resend the affected messages.`}
-        />
-      ) : null}
 
-      <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+      <section>
         <CompanyListPanel
           title="Top Companies by Usage"
-          subtitle="Highest SMS consumers across the platform."
+          subtitle="Highest SMS consumers across the platform. Low-quota warnings are handled by company/admin notifications."
           companies={stats.topCompaniesByUsage ?? []}
           emptyText="No company usage yet."
         />
-
-        <CompanyListPanel
-          title="Companies Near Quota Limit"
-          subtitle="Companies that have used 70% or more of their SMS credits."
-          companies={stats.companiesNearQuotaLimit ?? []}
-          emptyText="No companies are close to running out of SMS credits."
-          highlightRisk
-        />
       </section>
-
-      <RecentMessagesPanel
-        title="Recent Platform Messages"
-        subtitle="Latest SMS activity across all companies."
-        messages={stats.recentMessages}
-      />
     </div>
   );
 }
@@ -405,7 +449,7 @@ function TenantDashboard({
   const traffic = stats.traffic;
   const usagePercent = subscription?.usagePercent ?? 0;
   const role = stats.currentUser?.role;
-  const isUser = role === 'user';
+  const isUser = role === "user";
 
   return (
     <div className="space-y-6 sm:space-y-8">
@@ -438,19 +482,19 @@ function TenantDashboard({
             <div className="min-w-0">
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200">
                 <Zap className="h-3.5 w-3.5 text-blue-300" />
-                {isUser ? 'Company SMS balance' : 'Active subscription'}
+                {isUser ? "Company SMS balance" : "Active subscription"}
               </div>
 
               <h3 className="mt-5 break-words text-3xl font-black tracking-tight sm:text-4xl lg:text-5xl">
-                {subscription?.remainingSms ?? 0}
+                {formatNumber(subscription?.remainingSms)}
                 <span className="ml-2 text-lg font-bold text-slate-300 sm:text-xl">
                   SMS left
                 </span>
               </h3>
 
               <p className="mt-3 max-w-xl text-sm leading-6 text-slate-300">
-                {subscription?.smsUsed ?? 0} used from{' '}
-                {subscription?.smsQuota ?? 0} available company SMS quota.
+                {formatNumber(subscription?.smsUsed)} used from {" "}
+                {formatNumber(subscription?.smsQuota)} available company SMS quota.
               </p>
             </div>
 
@@ -474,7 +518,7 @@ function TenantDashboard({
               {!isUser ? (
                 <div className="mt-4 flex flex-col gap-2 text-xs text-slate-300 sm:flex-row sm:items-center sm:justify-between">
                   <span className="capitalize">
-                    {subscription?.subscriptionStatus ?? 'N/A'}
+                    {subscription?.subscriptionStatus ?? "N/A"}
                   </span>
 
                   <span>
@@ -482,7 +526,7 @@ function TenantDashboard({
                       ? `Expires ${new Date(
                           subscription.subscriptionEndDate,
                         ).toLocaleDateString()}`
-                      : 'No expiry set'}
+                      : "No expiry set"}
                   </span>
                 </div>
               ) : null}
@@ -493,22 +537,22 @@ function TenantDashboard({
 
       {usagePercent >= 70 ? (
         <AlertCard
-          tone={usagePercent >= 90 ? 'danger' : 'warning'}
+          tone={usagePercent >= 90 ? "danger" : "warning"}
           icon={AlertTriangle}
           title={
             usagePercent >= 100
-              ? 'SMS balance is exhausted'
+              ? "SMS balance is exhausted"
               : usagePercent >= 90
-                ? 'SMS balance is almost exhausted'
-                : 'SMS balance is running low'
+                ? "SMS balance is almost exhausted"
+                : "SMS balance is running low"
           }
           description={
             isUser
               ? usagePercent >= 100
-                ? 'Your company has used all available SMS credits. Please contact an admin to add more credits before sending more messages.'
+                ? "Your company has used all available SMS credits. Please contact an admin to add more credits before sending more messages."
                 : `Your company has used ${usagePercent}% of its SMS quota. Please contact an admin to request more SMS credits before sending is interrupted.`
               : usagePercent >= 100
-                ? 'This company has used all available SMS credits. Add more SMS credits or upgrade the plan before sending more messages.'
+                ? "This company has used all available SMS credits. Add more SMS credits or upgrade the plan before sending more messages."
                 : `This company has used ${usagePercent}% of its SMS quota. Add more SMS credits or upgrade the plan to avoid service interruption.`
           }
         />
@@ -518,10 +562,12 @@ function TenantDashboard({
         <AlertCard
           tone="danger"
           icon={AlertOctagon}
-          title="Some messages could not be delivered"
+          title="Some messages are in dead letter"
           description={`${traffic?.deadLetterMessages} message${
-            (traffic?.deadLetterMessages ?? 0) > 1 ? 's have' : ' has'
-          } failed permanently. Review the failed messages, fix the issue, then retry or resend them.`}
+            (traffic?.deadLetterMessages ?? 0) > 1 ? "s are" : " is"
+          } in dead letter. Review the failed message details, fix the root cause, then retry or resend them.`}
+          href="/messages/dead-letter"
+          actionLabel="Review Dead Letter"
         />
       ) : null}
 
@@ -542,6 +588,263 @@ function TenantDashboard({
   );
 }
 
+
+function ScopeSmsUsagePanel({
+  platformStats,
+  selectedCompany,
+  selectedCompanyStats,
+  selectedCompanyLoading,
+}: {
+  platformStats: DashboardStats;
+  selectedCompany?: CompanyOption;
+  selectedCompanyStats: DashboardStats | null;
+  selectedCompanyLoading: boolean;
+}) {
+  const activeStats = selectedCompany ? selectedCompanyStats : platformStats;
+  const subscription = activeStats?.subscription;
+
+  const smsQuota = subscription?.smsQuota ?? 0;
+  const smsUsed = subscription?.smsUsed ?? 0;
+  const remainingSms = subscription?.remainingSms ?? 0;
+  const usagePercent = subscription?.usagePercent ?? 0;
+
+  const title = selectedCompany
+    ? `${selectedCompany.name} SMS Usage`
+    : "All Companies SMS Usage";
+
+  const description = selectedCompany
+    ? `Current SMS quota usage for ${selectedCompany.name}.`
+    : "Current SMS quota usage across all companies.";
+
+  return (
+    <div className="overflow-hidden rounded-[1.5rem] border border-slate-100 bg-white p-4 shadow-sm sm:p-6">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-lg font-black text-slate-900">{title}</h3>
+          <p className="text-sm text-slate-500">{description}</p>
+        </div>
+
+        <span className="w-fit rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">
+          {selectedCompanyLoading && selectedCompany
+            ? "Loading..."
+            : `${usagePercent}% used`}
+        </span>
+      </div>
+
+      <div className="rounded-3xl bg-slate-950 p-5 text-white">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
+              SMS used
+            </p>
+
+            <p className="mt-2 text-3xl font-black sm:text-4xl">
+              {formatNumber(smsUsed)}
+              <span className="text-lg text-slate-400">
+                {" "}
+                / {formatNumber(smsQuota)}
+              </span>
+            </p>
+          </div>
+
+          <p className="text-sm text-slate-300">
+            Remaining: {formatNumber(remainingSms)}
+          </p>
+        </div>
+
+        <div className="mt-5 h-4 overflow-hidden rounded-full bg-white/15">
+          <div
+            className={`h-full rounded-full transition-all duration-700 ease-out ${getUsageBarColor(
+              usagePercent,
+            )}`}
+            style={{ width: `${Math.min(usagePercent, 100)}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <MiniMetric label="Allocated" value={smsQuota} />
+        <MiniMetric label="Used" value={smsUsed} />
+        <MiniMetric label="Remaining" value={remainingSms} />
+      </div>
+
+      {/* <p className="mt-4 text-xs leading-5 text-slate-400">
+        SMS usage is quota based. The period filter controls traffic analytics,
+        not the current quota balance.
+      </p> */}
+    </div>
+  );
+}
+
+function CompanyTrafficFilterPanel({
+  period,
+  setPeriod,
+  platformStats,
+  globalMessageBreakdown,
+  companies,
+  companiesLoading,
+  selectedCompanyId,
+  setSelectedCompanyId,
+  selectedCompanyStats,
+  selectedCompanyLoading,
+  messageBreakdown,
+}: {
+  period: DashboardPeriod;
+  setPeriod: (period: DashboardPeriod) => void;
+  platformStats: DashboardStats;
+  globalMessageBreakdown: { name: string; value: number }[];
+  companies: CompanyOption[];
+  companiesLoading: boolean;
+  selectedCompanyId: string;
+  setSelectedCompanyId: (companyId: string) => void;
+  selectedCompanyStats: DashboardStats | null;
+  selectedCompanyLoading: boolean;
+  messageBreakdown: { name: string; value: number }[];
+}) {
+  const selectedCompany = companies.find(
+    (company) => company.id === selectedCompanyId,
+  );
+
+  const activeStats = selectedCompanyId ? selectedCompanyStats : platformStats;
+  const activeBreakdown = selectedCompanyId
+    ? messageBreakdown
+    : globalMessageBreakdown;
+  const traffic = activeStats?.traffic;
+
+  const totalTraffic =
+    (traffic?.sentMessages ?? 0) +
+    (traffic?.deliveredMessages ?? 0) +
+    (traffic?.queuedMessages ?? 0) +
+    (traffic?.failedMessages ?? 0) +
+    (traffic?.deadLetterMessages ?? 0);
+
+  const isLoading = selectedCompanyId ? selectedCompanyLoading : false;
+  const chartTitle = selectedCompany
+    ? `${selectedCompany.name} traffic`
+    : "All companies traffic";
+
+  return (
+    <section className="overflow-visible rounded-[1.5rem] border border-slate-100 bg-white p-4 shadow-sm transition-all duration-300 hover:shadow-md sm:p-6">
+      <div className="mb-5">
+        <h3 className="text-lg font-black text-slate-900">
+          Company SMS Traffic
+        </h3>
+        <p className="mt-1 text-sm text-slate-500">
+          View traffic across all companies or filter by a specific company.
+        </p>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+        <div>
+          <label className="mb-1.5 block text-xs font-black uppercase tracking-[0.16em] text-slate-400">
+            Company
+          </label>
+
+          <select
+            value={selectedCompanyId}
+            onChange={(event) => setSelectedCompanyId(event.target.value)}
+            disabled={companiesLoading}
+            className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50"
+          >
+            <option value="">
+              {companiesLoading ? "Loading companies..." : "All companies"}
+            </option>
+
+            {companies.map((company) => (
+              <option key={company.id} value={company.id}>
+                {company.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {(["today", "week", "month", "year"] as const).map((item) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => setPeriod(item)}
+              className={`rounded-full px-4 py-2 text-xs font-bold capitalize transition ${
+                period === item
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <MiniMetric label="Total" value={totalTraffic} />
+        <MiniMetric label="Delivered" value={traffic?.deliveredMessages ?? 0} />
+        <MiniMetric
+          label="Delivery Rate"
+          value={`${traffic?.deliveryRate ?? 0}%`}
+        />
+      </div>
+
+      <div className="mt-6 rounded-3xl bg-slate-50 p-4">
+        <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-black text-slate-900">{chartTitle}</p>
+            <p className="text-sm text-slate-500">
+              Period: <span className="capitalize">{period}</span>
+            </p>
+          </div>
+        </div>
+
+        <div className="mx-auto flex h-[300px] w-full max-w-[420px] items-center justify-center overflow-visible">
+          {isLoading ? (
+            <div className="text-center text-sm font-medium text-slate-400">
+              Loading company traffic...
+            </div>
+          ) : activeBreakdown.length === 0 ? (
+            <EmptyChart />
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart
+                margin={{
+                  top: 10,
+                  right: 20,
+                  bottom: 10,
+                  left: 20,
+                }}
+              >
+                <Pie
+                  data={activeBreakdown}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius="72%"
+                  label={({ name, percent }) =>
+                    `${name}: ${((percent ?? 0) * 100).toFixed(0)}%`
+                  }
+                  isAnimationActive
+                  animationBegin={0}
+                  animationDuration={450}
+                  animationEasing="ease-out"
+                >
+                  {activeBreakdown.map((entry) => (
+                    <Cell
+                      key={entry.name}
+                      fill={STATUS_COLORS[entry.name] ?? "#64748b"}
+                    />
+                  ))}
+                </Pie>
+
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function TrafficPanel({
   title,
   period,
@@ -553,40 +856,40 @@ function TrafficPanel({
   title: string;
   period: DashboardPeriod;
   setPeriod: (period: DashboardPeriod) => void;
-  traffic: DashboardStats['traffic'];
+  traffic: DashboardStats["traffic"];
   messageBreakdown: { name: string; value: number }[];
   compactLinks?: boolean;
 }) {
   const trafficLinks = [
     {
-      label: 'Sent',
+      label: "Sent",
       val: traffic?.sentMessages,
-      t: 'sent',
-      href: '/messages/outbound',
+      t: "sent",
+      href: "/messages/outbound",
     },
     {
-      label: 'Delivered',
+      label: "Delivered",
       val: traffic?.deliveredMessages,
-      t: 'delivered',
-      href: '/messages/outbound/delivered',
+      t: "delivered",
+      href: "/messages/outbound/delivered",
     },
     {
-      label: 'Queued',
+      label: "Queued",
       val: traffic?.queuedMessages,
-      t: 'queued',
-      href: '/messages/outbound',
+      t: "queued",
+      href: "/messages/outbound",
     },
     {
-      label: 'Failed',
+      label: "Failed",
       val: traffic?.failedMessages,
-      t: 'failed',
-      href: '/messages/outbound/failed',
+      t: "failed",
+      href: "/messages/outbound/failed",
     },
     {
-      label: 'Dead Letter',
+      label: "Dead Letter",
       val: traffic?.deadLetterMessages,
-      t: 'dead',
-      href: '/messages/outbound/failed',
+      t: "dead",
+      href: "/messages/outbound/dead-letter",
     },
   ] as const;
 
@@ -598,15 +901,15 @@ function TrafficPanel({
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {(['today', 'week', 'month', 'year'] as const).map((item) => (
+          {(["today", "week", "month", "year"] as const).map((item) => (
             <button
               key={item}
               type="button"
               onClick={() => setPeriod(item)}
               className={`rounded-full px-4 py-2 text-xs font-bold capitalize transition ${
                 period === item
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               }`}
             >
               {item}
@@ -617,14 +920,14 @@ function TrafficPanel({
         <div
           className={`mx-auto mt-6 grid w-full grid-cols-1 overflow-visible xl:items-center ${
             compactLinks
-              ? 'max-w-[820px] gap-6 xl:grid-cols-[125px_minmax(0,1fr)]'
-              : 'max-w-[760px] gap-6 xl:grid-cols-[220px_minmax(0,1fr)]'
+              ? "max-w-[820px] gap-6 xl:grid-cols-[125px_minmax(0,1fr)]"
+              : "max-w-[760px] gap-6 xl:grid-cols-[220px_minmax(0,1fr)]"
           }`}
         >
           <div className="min-w-0 space-y-3">
             <div
               className={`flex flex-wrap gap-2 xl:flex-col ${
-                compactLinks ? 'xl:max-w-[125px]' : 'xl:max-w-[220px]'
+                compactLinks ? "xl:max-w-[125px]" : "xl:max-w-[220px]"
               }`}
             >
               {trafficLinks.map((link) => (
@@ -635,11 +938,7 @@ function TrafficPanel({
                   value={link.val ?? 0}
                   tone={
                     link.t as
-                      | 'sent'
-                      | 'delivered'
-                      | 'queued'
-                      | 'failed'
-                      | 'dead'
+                      "sent" | "delivered" | "queued" | "failed" | "dead"
                   }
                   compact={compactLinks}
                 />
@@ -679,7 +978,7 @@ function TrafficPanel({
                       {messageBreakdown.map((entry) => (
                         <Cell
                           key={entry.name}
-                          fill={STATUS_COLORS[entry.name] ?? '#64748b'}
+                          fill={STATUS_COLORS[entry.name] ?? "#64748b"}
                         />
                       ))}
                     </Pie>
@@ -702,18 +1001,30 @@ function CompanyListPanel({
   companies,
   emptyText,
   highlightRisk = false,
+  scrollAfter = 5,
 }: {
   title: string;
   subtitle: string;
   companies: CompanyUsage[];
   emptyText: string;
   highlightRisk?: boolean;
+  scrollAfter?: number;
 }) {
+  const shouldScroll = companies.length > scrollAfter;
+
   return (
     <section className="overflow-hidden rounded-[1.5rem] border border-slate-100 bg-white p-4 shadow-sm sm:p-6">
-      <div className="mb-5">
-        <h3 className="text-lg font-black text-slate-900">{title}</h3>
-        <p className="text-sm text-slate-500">{subtitle}</p>
+      <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-lg font-black text-slate-900">{title}</h3>
+          <p className="text-sm text-slate-500">{subtitle}</p>
+        </div>
+
+        {companies.length > 0 ? (
+          <span className="w-fit shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">
+            {formatNumber(companies.length)} companies
+          </span>
+        ) : null}
       </div>
 
       {companies.length === 0 ? (
@@ -721,7 +1032,13 @@ function CompanyListPanel({
           {emptyText}
         </div>
       ) : (
-        <div className="space-y-3">
+        <div
+          className={`space-y-3 ${
+            shouldScroll
+              ? "max-h-[520px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent"
+              : ""
+          }`}
+        >
           {companies.map((company) => (
             <Link
               key={company.id}
@@ -745,17 +1062,17 @@ function CompanyListPanel({
                   <p
                     className={`text-lg font-black ${
                       highlightRisk && company.usagePercent >= 90
-                        ? 'text-red-700'
+                        ? "text-red-700"
                         : highlightRisk
-                          ? 'text-yellow-700'
-                          : 'text-slate-900'
+                          ? "text-yellow-700"
+                          : "text-slate-900"
                     }`}
                   >
                     {company.usagePercent}%
                   </p>
 
                   <p className="text-xs text-slate-500">
-                    {company.smsUsed}/{company.smsQuota} used
+                    {formatNumber(company.smsUsed)}/{formatNumber(company.smsQuota)} used
                   </p>
                 </div>
               </div>
@@ -794,7 +1111,7 @@ function RecentMessagesPanel({
         </div>
 
         <span className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">
-          {messages?.length ?? 0} latest
+          {formatNumber(messages?.length)} latest
         </span>
       </div>
 
@@ -853,18 +1170,18 @@ function PlatformStatCard({
   value,
   icon: Icon,
   helper,
-  tone = 'default',
+  tone = "default",
 }: {
   title: string;
   value: string | number;
   icon: LucideIcon;
   helper: string;
-  tone?: 'default' | 'premium';
+  tone?: "default" | "premium";
 }) {
   const classes =
-    tone === 'premium'
-      ? 'border-purple-100 bg-purple-50 text-purple-900'
-      : 'border-slate-100 bg-white text-slate-900';
+    tone === "premium"
+      ? "border-purple-100 bg-purple-50 text-purple-900"
+      : "border-slate-100 bg-white text-slate-900";
 
   return (
     <div
@@ -877,7 +1194,7 @@ function PlatformStatCard({
           </p>
 
           <p className="mt-3 break-words text-4xl font-black tracking-tight">
-            {value}
+            {formatMetricValue(value)}
           </p>
         </div>
 
@@ -905,7 +1222,7 @@ function MiniMetric({
       </p>
 
       <p className="mt-2 break-words text-2xl font-black text-slate-900">
-        {value}
+        {formatMetricValue(value)}
       </p>
     </div>
   );
@@ -915,21 +1232,21 @@ function Badge({ label }: { label: string }) {
   const tone = label.toLowerCase();
 
   const classes =
-    tone === 'enterprise'
-      ? 'bg-slate-900 text-white'
-      : tone === 'vip' || tone === 'critical'
-        ? 'bg-purple-50 text-purple-700'
-        : tone === 'high'
-          ? 'bg-yellow-50 text-yellow-700'
-          : tone === 'active'
-            ? 'bg-green-50 text-green-700'
-            : 'bg-slate-100 text-slate-600';
+    tone === "enterprise"
+      ? "bg-slate-900 text-white"
+      : tone === "vip" || tone === "critical"
+        ? "bg-purple-50 text-purple-700"
+        : tone === "high"
+          ? "bg-yellow-50 text-yellow-700"
+          : tone === "active"
+            ? "bg-green-50 text-green-700"
+            : "bg-slate-100 text-slate-600";
 
   return (
     <span
       className={`rounded-full px-2.5 py-1 text-xs font-black capitalize ${classes}`}
     >
-      {label.replace('_', ' ')}
+      {label.replace("_", " ")}
     </span>
   );
 }
@@ -939,26 +1256,46 @@ function AlertCard({
   icon: Icon,
   title,
   description,
+  href,
+  actionLabel,
 }: {
-  tone: 'warning' | 'danger';
+  tone: "warning" | "danger";
   icon: LucideIcon;
   title: string;
   description: string;
+  href?: string;
+  actionLabel?: string;
 }) {
   const classes =
-    tone === 'danger'
-      ? 'border-rose-200 bg-rose-50 text-rose-800'
-      : 'border-yellow-200 bg-yellow-50 text-yellow-800';
+    tone === "danger"
+      ? "border-rose-200 bg-rose-50 text-rose-800"
+      : "border-yellow-200 bg-yellow-50 text-yellow-800";
+
+  const actionClasses =
+    tone === "danger"
+      ? "border-rose-200 bg-white text-rose-700 hover:bg-rose-100"
+      : "border-yellow-200 bg-white text-yellow-700 hover:bg-yellow-100";
 
   return (
     <div className={`rounded-2xl border px-5 py-4 ${classes}`}>
-      <div className="flex items-start gap-3">
-        <Icon className="mt-0.5 h-5 w-5 shrink-0" />
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <Icon className="mt-0.5 h-5 w-5 shrink-0" />
 
-        <div className="min-w-0">
-          <p className="font-black">{title}</p>
-          <p className="mt-1 text-sm">{description}</p>
+          <div className="min-w-0">
+            <p className="font-black">{title}</p>
+            <p className="mt-1 text-sm">{description}</p>
+          </div>
         </div>
+
+        {href && actionLabel ? (
+          <Link
+            href={href}
+            className={`inline-flex shrink-0 items-center justify-center rounded-xl border px-4 py-2 text-xs font-black transition ${actionClasses}`}
+          >
+            {actionLabel}
+          </Link>
+        ) : null}
       </div>
     </div>
   );
@@ -973,43 +1310,43 @@ function EmptyChart() {
 }
 
 function getUsageBarColor(usagePercent: number) {
-  if (usagePercent >= 90) return 'bg-red-400';
-  if (usagePercent >= 70) return 'bg-yellow-400';
-  return 'bg-blue-400';
+  if (usagePercent >= 90) return "bg-red-400";
+  if (usagePercent >= 70) return "bg-yellow-400";
+  return "bg-blue-400";
 }
 
 function getStatusClass(status: string) {
   switch (status) {
-    case 'delivered':
-      return 'border-green-100 bg-green-50 text-green-700';
-    case 'sent':
-      return 'border-emerald-100 bg-emerald-50 text-emerald-700';
-    case 'failed':
-      return 'border-red-100 bg-red-50 text-red-700';
-    case 'dead_letter':
-      return 'border-rose-200 bg-rose-50 text-rose-800';
-    case 'queued':
-      return 'border-blue-100 bg-blue-50 text-blue-700';
-    case 'processing':
-      return 'border-yellow-100 bg-yellow-50 text-yellow-700';
+    case "delivered":
+      return "border-green-100 bg-green-50 text-green-700";
+    case "sent":
+      return "border-emerald-100 bg-emerald-50 text-emerald-700";
+    case "failed":
+      return "border-red-100 bg-red-50 text-red-700";
+    case "dead_letter":
+      return "border-rose-200 bg-rose-50 text-rose-800";
+    case "queued":
+      return "border-blue-100 bg-blue-50 text-blue-700";
+    case "processing":
+      return "border-yellow-100 bg-yellow-50 text-yellow-700";
     default:
-      return 'border-slate-100 bg-slate-50 text-slate-600';
+      return "border-slate-100 bg-slate-50 text-slate-600";
   }
 }
 
 function getStatusIcon(status: string) {
   switch (status) {
-    case 'delivered':
+    case "delivered":
       return <CheckCircle2 className="h-3.5 w-3.5" />;
-    case 'sent':
+    case "sent":
       return <Send className="h-3.5 w-3.5" />;
-    case 'failed':
+    case "failed":
       return <AlertTriangle className="h-3.5 w-3.5" />;
-    case 'dead_letter':
+    case "dead_letter":
       return <AlertOctagon className="h-3.5 w-3.5" />;
-    case 'queued':
+    case "queued":
       return <Clock className="h-3.5 w-3.5" />;
-    case 'processing':
+    case "processing":
       return <Activity className="h-3.5 w-3.5" />;
     default:
       return <Radio className="h-3.5 w-3.5" />;
@@ -1018,9 +1355,9 @@ function getStatusIcon(status: string) {
 
 function formatStatus(status: string) {
   return status
-    .split('_')
+    .split("_")
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
+    .join(" ");
 }
 
 function DashboardSkeleton() {
@@ -1047,16 +1384,15 @@ function TrafficLink({
   href: string;
   title: string;
   value: number;
-  tone: 'sent' | 'delivered' | 'queued' | 'failed' | 'dead';
+  tone: "sent" | "delivered" | "queued" | "failed" | "dead";
   compact?: boolean;
 }) {
   const classes = {
-    sent: 'bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-100',
-    delivered:
-      'bg-green-50 text-green-700 border-green-100 hover:bg-green-100',
-    queued: 'bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-100',
-    failed: 'bg-red-50 text-red-700 border-red-100 hover:bg-red-100',
-    dead: 'bg-rose-50 text-rose-700 border-rose-100 hover:bg-rose-100',
+    sent: "bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-100",
+    delivered: "bg-green-50 text-green-700 border-green-100 hover:bg-green-100",
+    queued: "bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-100",
+    failed: "bg-red-50 text-red-700 border-red-100 hover:bg-red-100",
+    dead: "bg-rose-50 text-rose-700 border-rose-100 hover:bg-rose-100",
   }[tone];
 
   return (
@@ -1064,17 +1400,17 @@ function TrafficLink({
       href={href}
       className={`inline-flex max-w-full items-center justify-between rounded-full border font-bold transition ${classes} ${
         compact
-          ? 'gap-1.5 px-2.5 py-1.5 text-[11px]'
-          : 'gap-3 px-4 py-2 text-sm'
+          ? "gap-1.5 px-2.5 py-1.5 text-[11px]"
+          : "gap-3 px-4 py-2 text-sm"
       }`}
     >
       <span className="truncate">{title}</span>
       <span
         className={`shrink-0 rounded-full bg-white/70 py-0.5 ${
-          compact ? 'px-1.5 text-[9px]' : 'px-2 text-xs'
+          compact ? "px-1.5 text-[9px]" : "px-2 text-xs"
         }`}
       >
-        {value}
+        {formatNumber(value)}
       </span>
     </Link>
   );

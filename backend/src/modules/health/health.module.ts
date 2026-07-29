@@ -3,12 +3,18 @@ import { BullModule } from '@nestjs/bullmq';
 import { HealthController } from './health.controller';
 import { HealthService } from './health.service';
 import { SMS_QUEUE } from '../sms/constants/sms.constants';
+import { CAMPAIGN_QUEUE } from '../campaigns/constants/campaign.constants';
 
 @Module({
   imports: [
-    BullModule.registerQueue({
-      name: SMS_QUEUE,
-    }),
+    BullModule.registerQueue(
+      {
+        name: SMS_QUEUE,
+      },
+      {
+        name: CAMPAIGN_QUEUE,
+      },
+    ),
   ],
   controllers: [HealthController],
   providers: [HealthService],

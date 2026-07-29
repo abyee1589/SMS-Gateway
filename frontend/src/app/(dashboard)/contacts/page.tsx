@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import { ui } from '@/lib/ui';
@@ -37,6 +37,8 @@ type TokenPayload = {
   exp?: number;
 };
 
+type ActionPanel = 'create' | 'import' | null;
+
 function decodeJwtPayload(token: string): TokenPayload | null {
   try {
     const payload = token.split('.')[1];
@@ -52,7 +54,34 @@ function decodeJwtPayload(token: string): TokenPayload | null {
   }
 }
 
+function getErrorMessage(error: unknown) {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error
+  ) {
+    const message = (error as { message?: unknown }).message;
+
+    if (Array.isArray(message)) return message[0] ?? 'Request failed';
+    if (typeof message === 'string') return message;
+  }
+
+  if (error instanceof Error) return error.message;
+
+  return 'Request failed';
+}
+
+function formatNumber(value: number | string | null | undefined) {
+  const numberValue = Number(value ?? 0);
+
+  if (Number.isNaN(numberValue)) return '0';
+
+  return new Intl.NumberFormat('en-US').format(numberValue);
+}
+
 export default function ContactsPage() {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [phone, setPhone] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -61,16 +90,26 @@ export default function ContactsPage() {
   const [search, setSearch] = useState('');
   const [csvFile, setCsvFile] = useState<File | null>(null);
 
+  const [activePanel, setActivePanel] = useState<ActionPanel>(null);
   const [loading, setLoading] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [currentRole, setCurrentRole] = useState<string>('');
 
   const canImportCsv = useMemo(
     () => ['admin', 'super_admin'].includes(currentRole),
     [currentRole],
+  );
+
+  const activeContacts = useMemo(
+    () => contacts.filter((contact) => contact.isActive).length,
+    [contacts],
+  );
+
+  const inactiveContacts = useMemo(
+    () => contacts.filter((contact) => !contact.isActive).length,
+    [contacts],
   );
 
   async function loadContacts(searchValue = '') {
@@ -100,9 +139,7 @@ export default function ContactsPage() {
       setContacts(response.data);
     } catch (error) {
       console.error('Failed to load contacts', error);
-      setError(
-        error instanceof Error ? error.message : 'Failed to load contacts',
-      );
+      setError(getErrorMessage(error));
     } finally {
       setPageLoading(false);
     }
@@ -111,6 +148,34 @@ export default function ContactsPage() {
   useEffect(() => {
     loadContacts();
   }, []);
+
+  function resetContactForm() {
+    setPhone('');
+    setFirstName('');
+    setLastName('');
+    setEmail('');
+  }
+
+  function resetCsvImport() {
+    setCsvFile(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }
+
+  function togglePanel(panel: ActionPanel) {
+    setActivePanel((currentPanel) => (currentPanel === panel ? null : panel));
+    setError('');
+
+    if (panel === 'create') {
+      resetCsvImport();
+    }
+
+    if (panel === 'import') {
+      resetContactForm();
+    }
+  }
 
   async function handleCreateContact(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -124,13 +189,11 @@ export default function ContactsPage() {
 
     if (!phone.trim()) {
       toast.error('Phone number is required');
-      setSuccess('');
       return;
     }
 
     setLoading(true);
     setError('');
-    setSuccess('');
 
     try {
       await apiFetch(
@@ -147,19 +210,14 @@ export default function ContactsPage() {
         token,
       );
 
-      setPhone('');
-      setFirstName('');
-      setLastName('');
-      setEmail('');
+      resetContactForm();
+      setActivePanel(null);
 
       toast.success('Contact created successfully');
       await loadContacts(search);
     } catch (error) {
       console.error('Failed to create contact', error);
-      toast.error(
-        error instanceof Error ? error.message : 'Failed to create contact',
-      );
-      setSuccess('');
+      toast.error(getErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -193,7 +251,6 @@ export default function ContactsPage() {
 
     setImportLoading(true);
     setError('');
-    setSuccess('');
 
     try {
       const formData = new FormData();
@@ -236,17 +293,19 @@ export default function ContactsPage() {
 
       const result = JSON.parse(text);
 
-      setCsvFile(null);
+      resetCsvImport();
+      setActivePanel(null);
+
       toast.success(
-        `CSV import finished: ${result.imported} imported, ${result.skipped} skipped.`,
+        `CSV import finished: ${formatNumber(result.imported)} imported, ${formatNumber(
+          result.skipped,
+        )} skipped.`,
       );
+
       await loadContacts(search);
     } catch (error) {
       console.error('Failed to import contacts', error);
-      toast.error(
-        error instanceof Error ? error.message : 'Failed to import contacts',
-      );
-      setSuccess('');
+      toast.error(getErrorMessage(error));
     } finally {
       setImportLoading(false);
     }
@@ -262,116 +321,189 @@ export default function ContactsPage() {
   return (
     <div className={ui.page}>
       {error ? <div className={ui.alertError}>{error}</div> : null}
-      {success ? <div className={ui.alertSuccess}>{success}</div> : null}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <StatCard label="Total Contacts" value={formatNumber(contacts.length)} />
+        <StatCard label="Active" value={formatNumber(activeContacts)} />
+        <StatCard label="Inactive" value={formatNumber(inactiveContacts)} />
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 bg-gradient-to-r from-slate-950 to-slate-800 px-4 py-5 text-white sm:px-6">
-          <h2 className="text-2xl font-bold">Create Contact</h2>
-          <p className="mt-1 text-sm leading-6 text-slate-300">
-            Add individual contacts for direct messaging and bulk SMS sending.
-          </p>
-        </div>
-
-        <div className="p-4 sm:p-6">
-          <form
-            onSubmit={handleCreateContact}
-            className="grid grid-cols-1 gap-4 md:grid-cols-2"
-          >
-            <div className="space-y-1.5">
-              <label className={ui.label}>Phone Number</label>
-              <input
-                type="text"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
-                placeholder="+2519XXXXXXXX or 09XXXXXXXX"
-              />
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <h2 className="text-2xl font-bold">Contact Management</h2>
+              <p className="mt-1 text-sm leading-6 text-slate-300">
+                Create contacts individually or import company contacts in bulk
+                using a CSV file.
+              </p>
             </div>
 
-            <div className="space-y-1.5">
-              <label className={ui.label}>Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
-                placeholder="contact@example.com"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className={ui.label}>First Name</label>
-              <input
-                type="text"
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className={ui.label}>Last Name</label>
-              <input
-                type="text"
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
-              />
-            </div>
-
-            <div className="md:col-span-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <button
-                type="submit"
-                disabled={loading}
-                className={`${ui.primaryButton} w-full justify-center sm:w-auto`}
+                type="button"
+                onClick={() => togglePanel('create')}
+                className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
+                  activePanel === 'create'
+                    ? 'bg-white text-slate-950'
+                    : 'bg-white/10 text-white hover:bg-white/20'
+                }`}
               >
-                {loading ? 'Creating...' : 'Create Contact'}
+                {activePanel === 'create' ? 'Close Form' : 'New Contact'}
               </button>
+
+              {canImportCsv ? (
+                <button
+                  type="button"
+                  onClick={() => togglePanel('import')}
+                  className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
+                    activePanel === 'import'
+                      ? 'bg-white text-slate-950'
+                      : 'bg-white/10 text-white hover:bg-white/20'
+                  }`}
+                >
+                  {activePanel === 'import' ? 'Close Import' : 'Import CSV'}
+                </button>
+              ) : null}
             </div>
-          </form>
-        </div>
-      </div>
-
-      {canImportCsv ? (
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-4 py-5 sm:px-6">
-            <h2 className={ui.sectionTitle}>Import Contacts CSV</h2>
-            <p className={`${ui.sectionSubtitle} leading-6`}>
-              Bulk import company contacts using a CSV file with phone,
-              firstName, lastName, and email columns.
-            </p>
           </div>
+        </div>
 
-          <div className="p-4 sm:p-6">
+        {activePanel === 'create' ? (
+          <div className="border-b border-slate-100 p-4 sm:p-6">
+            <form onSubmit={handleCreateContact} className="space-y-5">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Field label="Phone Number">
+                  <input
+                    type="text"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
+                    placeholder="+2519XXXXXXXX or 09XXXXXXXX"
+                  />
+                </Field>
+
+                <Field label="Email">
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
+                    placeholder="contact@example.com"
+                  />
+                </Field>
+
+                <Field label="First Name">
+                  <input
+                    type="text"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
+                    placeholder="First name"
+                  />
+                </Field>
+
+                <Field label="Last Name">
+                  <input
+                    type="text"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    className={`${ui.input} transition focus:ring-4 focus:ring-blue-100`}
+                    placeholder="Last name"
+                  />
+                </Field>
+              </div>
+
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className={`${ui.primaryButton} w-full justify-center sm:w-auto`}
+                >
+                  {loading ? 'Creating...' : 'Create Contact'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={resetContactForm}
+                  disabled={loading}
+                  className={`${ui.secondaryButton} w-full justify-center sm:w-auto`}
+                >
+                  Clear
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : null}
+
+        {activePanel === 'import' && canImportCsv ? (
+          <div className="border-b border-slate-100 p-4 sm:p-6">
             <form onSubmit={handleCsvImport} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className={ui.label}>CSV File</label>
+              <div>
+                <h3 className="text-lg font-black text-slate-900">
+                  Import Contacts CSV
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-slate-500">
+                  Upload a CSV file with phone, firstName, lastName, and email
+                  columns.
+                </p>
+              </div>
+
+              <Field label="CSV File">
                 <input
+                  ref={fileInputRef}
                   type="file"
                   accept=".csv"
                   onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
                   className={`${ui.input} file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-slate-700 hover:file:bg-slate-200`}
                 />
+
                 {csvFile ? (
-                  <p className="break-words text-xs text-slate-500">
+                  <p className="mt-2 break-words text-xs text-slate-500">
                     Selected: {csvFile.name}
                   </p>
                 ) : null}
-              </div>
+              </Field>
 
-              <button
-                type="submit"
-                disabled={importLoading || !csvFile}
-                className={`${ui.secondaryButton} w-full justify-center sm:w-auto`}
-              >
-                {importLoading ? 'Importing...' : 'Import CSV'}
-              </button>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <button
+                  type="submit"
+                  disabled={importLoading || !csvFile}
+                  className={`${ui.primaryButton} w-full justify-center sm:w-auto`}
+                >
+                  {importLoading ? 'Importing...' : 'Import CSV'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={resetCsvImport}
+                  disabled={importLoading}
+                  className={`${ui.secondaryButton} w-full justify-center sm:w-auto`}
+                >
+                  Clear File
+                </button>
+              </div>
             </form>
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        {!activePanel ? (
+          <div className="p-4 sm:p-6">
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm leading-6 text-slate-500">
+              Choose <span className="font-bold text-slate-700">New Contact</span>
+              {canImportCsv ? (
+                <>
+                  {' '}
+                  or <span className="font-bold text-slate-700">Import CSV</span>
+                </>
+              ) : null}{' '}
+              to add contacts. Existing contacts are listed below.
+            </div>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-5 sm:px-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div className="min-w-0">
@@ -394,12 +526,27 @@ export default function ContactsPage() {
                 className={`${ui.input} min-w-0 sm:w-72`}
                 placeholder="Search contacts..."
               />
+
               <button
                 type="submit"
                 className={`${ui.secondaryButton} w-full justify-center sm:w-auto`}
               >
                 Search
               </button>
+
+              {search ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setSearch('');
+                    setPageLoading(true);
+                    await loadContacts('');
+                  }}
+                  className={`${ui.secondaryButton} w-full justify-center sm:w-auto`}
+                >
+                  Clear
+                </button>
+              ) : null}
             </form>
           </div>
         </div>
@@ -411,54 +558,93 @@ export default function ContactsPage() {
             </div>
           ) : contacts.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 py-12 text-center text-slate-500">
-              No contacts found. Create your first contact above.
+              No contacts found. Use the New Contact button above to create one.
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="max-h-[760px] space-y-3 overflow-y-auto pr-2">
               {contacts.map((contact) => (
-                <div
+                <ContactCard
                   key={contact.id}
-                  className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
-                >
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="min-w-0">
-                      <p className="break-words font-semibold text-gray-900">
-                        {getContactName(contact)}
-                      </p>
-
-                      <div className="mt-2 space-y-1">
-                        <p className="break-words text-sm text-gray-600">
-                          {contact.phone}
-                        </p>
-
-                        {contact.email ? (
-                          <p className="break-words text-sm text-gray-500">
-                            {contact.email}
-                          </p>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-2 lg:items-end">
-                      <span
-                        className={`inline-flex h-7 w-20 items-center justify-center rounded-full px-2.5 text-xs font-bold ${
-                          contact.isActive
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-red-100 text-red-700'
-                        }`}
-                      >
-                        {contact.isActive ? 'Active' : 'Inactive'}
-                      </span>
-
-                      <p className="text-xs text-gray-400">
-                        {new Date(contact.createdAt).toLocaleDateString()}
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                  contact={contact}
+                  name={getContactName(contact)}
+                />
               ))}
             </div>
           )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className={ui.label}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+}: {
+  label: string | number;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">
+        {label}
+      </p>
+      <p className="mt-2 break-words text-2xl font-black text-slate-950">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function ContactCard({ contact, name }: { contact: Contact; name: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:bg-slate-50">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <p className="break-words font-semibold text-gray-900">{name}</p>
+
+          <div className="mt-2 space-y-1">
+            <p className="break-words text-sm text-gray-600">
+              {contact.phone}
+            </p>
+
+            {contact.email ? (
+              <p className="break-words text-sm text-gray-500">
+                {contact.email}
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2 lg:items-end">
+          <span
+            className={`inline-flex h-7 w-20 items-center justify-center rounded-full px-2.5 text-xs font-bold ${
+              contact.isActive
+                ? 'bg-green-100 text-green-700'
+                : 'bg-red-100 text-red-700'
+            }`}
+          >
+            {contact.isActive ? 'Active' : 'Inactive'}
+          </span>
+
+          <p className="text-xs text-gray-400">
+            {new Date(contact.createdAt).toLocaleDateString()}
+          </p>
         </div>
       </div>
     </div>

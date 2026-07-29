@@ -9,6 +9,9 @@ import {
   BillingNotificationLog,
   BillingNotificationType,
 } from './entities/billing-notification-log.entity';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationType } from '../notifications/entities/notification.entity';
+
 
 type SmsUsageNotificationLevel = {
   type: BillingNotificationType;
@@ -39,6 +42,8 @@ export class BillingNotificationsService {
     private readonly notificationLogRepository: Repository<BillingNotificationLog>,
 
     private readonly mailService: MailService,
+
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_8AM)
@@ -185,6 +190,14 @@ export class BillingNotificationsService {
     for (const admin of admins) {
       const email = admin.email?.trim().toLowerCase();
 
+      await this.sendInAppBillingNotification({
+        tenant,
+        admin,
+        type,
+        targetDate,
+        subject,
+      });
+
       if (!this.isDeliverableAdminEmail(email)) {
         this.logger.warn(
           `Skipping billing email for placeholder or invalid address: ${admin.email}`,
@@ -254,7 +267,100 @@ export class BillingNotificationsService {
       }
     }
   }
+  private async sendInAppBillingNotification({
+  tenant,
+  admin,
+  type,
+  targetDate,
+  subject,
+}: {
+  tenant: Tenant;
+  admin: User;
+  type: BillingNotificationType;
+  targetDate: string;
+  subject: string;
+}) {
+  const notificationType = this.mapBillingTypeToNotificationType(type);
 
+  const message = this.getInAppBillingMessage({
+    tenant,
+    type,
+  });
+
+  await this.notificationsService.createOnce({
+    tenantId: tenant.id,
+    userId: admin.id,
+    type: notificationType,
+    title: subject,
+    message,
+    actionUrl: '/billing',
+    dedupeKey: `${tenant.id}:${admin.id}:${type}:${targetDate}`,
+    metadata: {
+      billingNotificationType: type,
+      targetDate,
+      tenantName: tenant.name,
+      smsQuota: tenant.smsQuota,
+      smsUsed: tenant.smsUsed,
+      subscriptionEndDate: tenant.subscriptionEndDate
+        ? tenant.subscriptionEndDate.toISOString()
+        : null,
+    },
+  });
+}
+
+  private mapBillingTypeToNotificationType(
+    type: BillingNotificationType,
+  ): NotificationType {
+    if (type === 'sms_usage_exhausted_100_percent') {
+      return NotificationType.EXHAUSTED_QUOTA;
+    }
+
+    if (type === 'sms_usage_critical_95_percent') {
+      return NotificationType.CRITICAL_QUOTA;
+    }
+
+    if (type === 'sms_usage_reminder_75_percent') {
+      return NotificationType.LOW_QUOTA;
+    }
+
+    if (type === 'subscription_expired') {
+      return NotificationType.SUBSCRIPTION_EXPIRED;
+    }
+
+    return NotificationType.SUBSCRIPTION_EXPIRING;
+  }
+
+  private getInAppBillingMessage({
+    tenant,
+    type,
+  }: {
+    tenant: Tenant;
+    type: BillingNotificationType;
+  }) {
+    const smsQuota = Number(tenant.smsQuota || 0);
+    const smsUsed = Number(tenant.smsUsed || 0);
+    const remaining = Math.max(smsQuota - smsUsed, 0);
+    const usagePercent =
+      smsQuota > 0 ? Math.min(Math.round((smsUsed / smsQuota) * 100), 100) : 0;
+
+    if (type === 'sms_usage_exhausted_100_percent') {
+      return `${tenant.name} has used all SMS credits. Remaining balance: ${remaining}.`;
+    }
+
+    if (type === 'sms_usage_critical_95_percent') {
+      return `${tenant.name} has used ${usagePercent}% of its SMS credits. Remaining balance: ${remaining}.`;
+    }
+
+    if (type === 'sms_usage_reminder_75_percent') {
+      return `${tenant.name} has used ${usagePercent}% of its SMS credits. Remaining balance: ${remaining}.`;
+    }
+
+    if (type === 'subscription_expired') {
+      return `${tenant.name} subscription expires today. Renew the subscription to avoid service interruption.`;
+    }
+
+    return `${tenant.name} subscription is close to expiry. Please review the billing page.`;
+  }
   private isDeliverableAdminEmail(email?: string) {
     if (!email) return false;
 

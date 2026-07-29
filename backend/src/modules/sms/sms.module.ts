@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule } from '@nestjs/config';
@@ -7,21 +7,26 @@ import { SmsController } from './sms.controller';
 import { SmsWebhookController } from './sms-webhook.controller';
 import { SmsMessage } from './entities/sms.entity';
 import { Contact } from '../contacts/entities/contact.entity';
-import { ContactGroup } from '../contacts/entities/contact-group.entity';import { SmsProcessor } from './sms.processor';
+import { ContactGroup } from '../contacts/entities/contact-group.entity';
+import { SmsProcessor } from './sms.processor';
 import { SMS_QUEUE } from './constants/sms.constants';
 import { SmsProviderFactory } from './providers/sms-provider.factory';
 import { AfricasTalkingSmsProvider } from './providers/africastalking-sms.provider';
 import { TenantsModule } from '../tenants/tenants.module';
 import { ZergawSmsProvider } from './providers/zergaw-sms.provider';
+import { CampaignsModule } from '../campaigns/campaigns.module';
+import { MessageTemplatesModule } from '../message-templates/message-templates.module';
 
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([SmsMessage,Contact, ContactGroup]),
+    TypeOrmModule.forFeature([SmsMessage, Contact, ContactGroup]),
     BullModule.registerQueue({
       name: SMS_QUEUE,
     }),
-    TenantsModule
+    TenantsModule,
+    forwardRef(() => CampaignsModule),
+    MessageTemplatesModule,
   ],
   providers: [
     SmsService,
@@ -33,4 +38,4 @@ import { ZergawSmsProvider } from './providers/zergaw-sms.provider';
   controllers: [SmsController, SmsWebhookController],
   exports: [SmsService],
 })
-export class SmsModule {}
+export class SmsModule {}      

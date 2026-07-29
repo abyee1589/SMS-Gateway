@@ -1,15 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import * as XLSX from 'xlsx';
+
 import { apiFetch } from '@/lib/api';
 import { getToken } from '@/lib/auth';
 import { ui } from '@/lib/ui';
 import toast from 'react-hot-toast';
 
 type SendMode = 'now' | 'schedule';
-type TargetMode = 'single' | 'multiple' | 'group';
+type TargetMode = 'single' | 'multiple' | 'group' | 'excel';
 
 type ContactGroup = {
   id: string;
@@ -34,6 +36,14 @@ type BulkMessageResponse = {
   messageIds: string[];
 };
 
+type ExcelRow = Record<string, string | number | boolean | null | undefined>;
+
+type ApiErrorShape = {
+  message?: string | string[];
+  error?: string;
+  statusCode?: number;
+};
+
 function getMinScheduleDateTime() {
   const date = new Date(Date.now() + 60 * 1000);
   const timezoneOffsetMs = date.getTimezoneOffset() * 60 * 1000;
@@ -49,24 +59,171 @@ function parseManualRecipients(value: string) {
     .filter(Boolean);
 }
 
+function normalizeHeader(value: string) {
+  return value.toLowerCase().trim().replace(/[\s_-]+/g, '');
+}
+
+function isLikelyPhoneHeader(header: string) {
+  const normalized = normalizeHeader(header);
+
+  return [
+    'phone',
+    'phonenumber',
+    'mobile',
+    'mobilenumber',
+    'recipient',
+    'recipients',
+    'number',
+    'contact',
+    'contactnumber',
+    'tel',
+    'telephone',
+  ].includes(normalized);
+}
+
+function cleanExcelCell(value: unknown) {
+  if (value === null || value === undefined) return '';
+
+  return String(value).trim();
+}
+
+function extractPhonesFromRows(rows: ExcelRow[]) {
+  if (!rows.length) return [];
+
+  const headers = Object.keys(rows[0] ?? {});
+  const phoneHeader = headers.find((header) => isLikelyPhoneHeader(header));
+
+  const phones: string[] = [];
+
+  for (const row of rows) {
+    if (phoneHeader) {
+      const phone = cleanExcelCell(row[phoneHeader]);
+
+      if (phone) {
+        phones.push(phone);
+      }
+
+      continue;
+    }
+
+    for (const value of Object.values(row)) {
+      const cell = cleanExcelCell(value);
+
+      if (!cell) continue;
+
+      const looksLikePhone =
+        cell.startsWith('+') ||
+        cell.startsWith('0') ||
+        cell.startsWith('251') ||
+        /^[0-9]{8,15}$/.test(cell);
+
+      if (looksLikePhone) {
+        phones.push(cell);
+        break;
+      }
+    }
+  }
+
+  return [...new Set(phones.map((phone) => phone.trim()).filter(Boolean))];
+}
+
+function getErrorMessage(error: unknown, fallback = 'Request failed') {
+  if (typeof error === 'string') return error;
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (typeof error === 'object' && error !== null) {
+    const apiError = error as ApiErrorShape;
+
+    if (Array.isArray(apiError.message)) {
+      return apiError.message[0] || fallback;
+    }
+
+    if (typeof apiError.message === 'string' && apiError.message.trim()) {
+      return apiError.message;
+    }
+
+    if (typeof apiError.error === 'string' && apiError.error.trim()) {
+      return apiError.error;
+    }
+  }
+
+  return fallback;
+}
+
+function getMessageSubmitError(error: unknown, sendMode: SendMode) {
+  const fallback =
+    sendMode === 'schedule'
+      ? 'Failed to schedule message'
+      : 'Failed to send message';
+
+  const message = getErrorMessage(error, fallback);
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes('subscription') && normalized.includes('expired')) {
+    return 'Your company subscription has expired. Please renew the subscription before sending SMS.';
+  }
+
+  if (normalized.includes('tenant suspended') || normalized.includes('suspended')) {
+    return 'SMS sending is blocked because this company is suspended.';
+  }
+
+  if (normalized.includes('quota') && normalized.includes('exceeded')) {
+    return 'SMS quota is not enough for this message. Please add more SMS credit before sending.';
+  }
+
+  if (normalized.includes('not enough') && normalized.includes('sms')) {
+    return 'SMS credit is not enough for this message. Please add more SMS credit before sending.';
+  }
+
+  if (normalized.includes('subscription') && normalized.includes('inactive')) {
+    return 'This company does not have an active subscription. Please activate or assign a subscription plan first.';
+  }
+
+  if (normalized.includes('expired')) {
+    return 'This action is blocked because the subscription or account status is expired.';
+  }
+
+  return message;
+}
+
+function formatNumber(value: number | string) {
+  const numberValue = Number(value);
+
+  if (Number.isNaN(numberValue)) return String(value);
+
+  return new Intl.NumberFormat('en-US').format(numberValue);
+}
+
 export default function NewMessagePage() {
   const searchParams = useSearchParams();
+  const excelFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [targetMode, setTargetMode] = useState<TargetMode>(() =>
     searchParams.get('recipient') ? 'single' : 'single',
   );
+
   const [recipient, setRecipient] = useState(
     () => searchParams.get('recipient') ?? '',
   );
+
   const [bulkRecipientsText, setBulkRecipientsText] = useState('');
+  const [excelRecipients, setExcelRecipients] = useState<string[]>([]);
+  const [excelFileName, setExcelFileName] = useState('');
+  const [excelLoading, setExcelLoading] = useState(false);
+
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [contactGroups, setContactGroups] = useState<ContactGroup[]>([]);
   const [groupsLoading, setGroupsLoading] = useState(false);
 
   const [content, setContent] = useState(() => searchParams.get('content') ?? '');
+
   const [sendMode, setSendMode] = useState<SendMode>(() =>
     searchParams.get('mode') === 'schedule' ? 'schedule' : 'now',
   );
+
   const [scheduledAt, setScheduledAt] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -92,6 +249,7 @@ export default function NewMessagePage() {
 
       try {
         setGroupsLoading(true);
+
         const data = await apiFetch<ContactGroup[]>(
           '/contact-groups',
           undefined,
@@ -101,6 +259,7 @@ export default function NewMessagePage() {
         setContactGroups(data);
       } catch (error) {
         console.error('Failed to load contact groups', error);
+        toast.error(getErrorMessage(error, 'Failed to load contact groups'));
       } finally {
         setGroupsLoading(false);
       }
@@ -134,6 +293,7 @@ export default function NewMessagePage() {
     if (targetMode === 'single') return recipient.trim() ? 1 : 0;
     if (targetMode === 'multiple') return manualRecipients.length;
     if (targetMode === 'group') return selectedGroupRecipientCount;
+    if (targetMode === 'excel') return excelRecipients.length;
 
     return 0;
   }, [
@@ -141,13 +301,17 @@ export default function NewMessagePage() {
     recipient,
     manualRecipients.length,
     selectedGroupRecipientCount,
+    excelRecipients.length,
   ]);
 
   const estimatedTotalSegments = estimatedSegments * estimatedRecipientCount;
 
   const minScheduleDateTime = useMemo(() => getMinScheduleDateTime(), []);
 
-  const isBulkMode = targetMode === 'multiple' || targetMode === 'group';
+  const isBulkMode =
+    targetMode === 'multiple' ||
+    targetMode === 'group' ||
+    targetMode === 'excel';
 
   const submitButtonText = loading
     ? sendMode === 'schedule'
@@ -181,6 +345,7 @@ export default function NewMessagePage() {
     setTargetMode('single');
     setRecipient('');
     setBulkRecipientsText('');
+    clearExcelImport();
     setSelectedGroupId('');
     setContent('');
     setScheduledAt('');
@@ -198,6 +363,11 @@ export default function NewMessagePage() {
       return false;
     }
 
+    if (targetMode === 'excel' && excelRecipients.length === 0) {
+      toast.error('Import an Excel file with at least one phone number');
+      return false;
+    }
+
     if (targetMode === 'group' && !selectedGroupId) {
       toast.error('Please select a contact group');
       return false;
@@ -206,7 +376,75 @@ export default function NewMessagePage() {
     return true;
   }
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  function clearExcelImport() {
+    setExcelRecipients([]);
+    setExcelFileName('');
+
+    if (excelFileInputRef.current) {
+      excelFileInputRef.current.value = '';
+    }
+  }
+
+  async function handleExcelFileChange(
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    const allowed =
+      file.name.endsWith('.xlsx') ||
+      file.name.endsWith('.xls') ||
+      file.name.endsWith('.csv');
+
+    if (!allowed) {
+      toast.error('Please upload an Excel or CSV file');
+      event.target.value = '';
+      return;
+    }
+
+    setExcelLoading(true);
+    setExcelFileName(file.name);
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+
+      if (!firstSheetName) {
+        clearExcelImport();
+        toast.error('The file does not contain any sheet');
+        return;
+      }
+
+      const sheet = workbook.Sheets[firstSheetName];
+
+      const rows = XLSX.utils.sheet_to_json<ExcelRow>(sheet, {
+        defval: '',
+      });
+
+      const phones = extractPhonesFromRows(rows);
+
+      if (!phones.length) {
+        clearExcelImport();
+        toast.error(
+          'No phone numbers found. Use a column named phone, phoneNumber, mobile, recipient, or number.',
+        );
+        return;
+      }
+
+      setExcelRecipients(phones);
+      toast.success(`${formatNumber(phones.length)} recipient number(s) imported`);
+    } catch (error) {
+      console.error('Failed to read Excel file', error);
+      clearExcelImport();
+      toast.error(getErrorMessage(error, 'Failed to read Excel file'));
+    } finally {
+      setExcelLoading(false);
+    }
+  }
+
+  async function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
 
     const token = getToken();
@@ -275,13 +513,21 @@ export default function NewMessagePage() {
                   ? { scheduledAt: scheduledIso }
                   : {}),
               }
-            : {
-                contactGroupId: selectedGroupId,
-                content: content.trim(),
-                ...(sendMode === 'schedule' && scheduledIso
-                  ? { scheduledAt: scheduledIso }
-                  : {}),
-              };
+            : targetMode === 'excel'
+              ? {
+                  recipients: excelRecipients,
+                  content: content.trim(),
+                  ...(sendMode === 'schedule' && scheduledIso
+                    ? { scheduledAt: scheduledIso }
+                    : {}),
+                }
+              : {
+                  contactGroupId: selectedGroupId,
+                  content: content.trim(),
+                  ...(sendMode === 'schedule' && scheduledIso
+                    ? { scheduledAt: scheduledIso }
+                    : {}),
+                };
 
         const response = await apiFetch<BulkMessageResponse>(
           '/messages/bulk',
@@ -294,13 +540,13 @@ export default function NewMessagePage() {
 
         toast.success(
           sendMode === 'schedule'
-            ? `${response.totalRecipients} SMS scheduled successfully`
-            : `${response.queued} SMS queued successfully`,
+            ? `${formatNumber(response.totalRecipients)} SMS scheduled successfully`
+            : `${formatNumber(response.queued)} SMS queued successfully`,
         );
 
         if (response.duplicatesRemoved > 0) {
           toast(
-            `${response.duplicatesRemoved} duplicate recipient${
+            `${formatNumber(response.duplicatesRemoved)} duplicate recipient${
               response.duplicatesRemoved === 1 ? '' : 's'
             } removed`,
           );
@@ -310,14 +556,7 @@ export default function NewMessagePage() {
       resetForm();
     } catch (error) {
       console.error('Failed to submit message', error);
-
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : sendMode === 'schedule'
-            ? 'Failed to schedule message'
-            : 'Failed to send message',
-      );
+      toast.error(getMessageSubmitError(error, sendMode));
     } finally {
       setLoading(false);
     }
@@ -369,7 +608,7 @@ export default function NewMessagePage() {
               <div className="space-y-2">
                 <label className={ui.label}>Send To</label>
 
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
                   <TargetModeButton
                     active={targetMode === 'single'}
                     title="Single Number"
@@ -389,6 +628,13 @@ export default function NewMessagePage() {
                     title="Contact Group"
                     description="Send to a saved group"
                     onClick={() => setTargetMode('group')}
+                  />
+
+                  <TargetModeButton
+                    active={targetMode === 'excel'}
+                    title="Import Excel"
+                    description="Upload xlsx, xls, or csv"
+                    onClick={() => setTargetMode('excel')}
                   />
                 </div>
               </div>
@@ -415,7 +661,7 @@ export default function NewMessagePage() {
                   <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                     <label className={ui.label}>Recipient Phone Numbers</label>
                     <span className="text-xs text-slate-400">
-                      {manualRecipients.length} recipient
+                      {formatNumber(manualRecipients.length)} recipient
                       {manualRecipients.length === 1 ? '' : 's'}
                     </span>
                   </div>
@@ -431,6 +677,77 @@ export default function NewMessagePage() {
                     Separate numbers with a new line, comma, or semicolon.
                     Duplicates are removed automatically.
                   </p>
+                </div>
+              ) : null}
+
+              {targetMode === 'excel' ? (
+                <div className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+                  <div>
+                    <label className={ui.label}>Import Recipients From Excel</label>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      Upload a file with a column named{' '}
+                      <span className="font-semibold">phone</span>,{' '}
+                      <span className="font-semibold">phoneNumber</span>,{' '}
+                      <span className="font-semibold">mobile</span>,{' '}
+                      <span className="font-semibold">recipient</span>, or{' '}
+                      <span className="font-semibold">number</span>.
+                    </p>
+                  </div>
+
+                  <input
+                    ref={excelFileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    onChange={handleExcelFileChange}
+                    className="block w-full cursor-pointer rounded-xl border border-blue-100 bg-white text-sm text-slate-700 file:mr-4 file:border-0 file:bg-blue-600 file:px-4 file:py-3 file:text-sm file:font-bold file:text-white hover:file:bg-blue-700"
+                  />
+
+                  {excelLoading ? (
+                    <p className="text-sm font-semibold text-blue-700">
+                      Reading file...
+                    </p>
+                  ) : null}
+
+                  {excelFileName ? (
+                    <div className="rounded-xl bg-white p-3 text-sm">
+                      <p className="font-semibold text-slate-800">
+                        {excelFileName}
+                      </p>
+                      <p className="mt-1 text-slate-500">
+                        {formatNumber(excelRecipients.length)} recipient
+                        {excelRecipients.length === 1 ? '' : 's'} imported
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {excelRecipients.length > 0 ? (
+                    <div className="rounded-xl border border-blue-100 bg-white p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                          Preview
+                        </p>
+                        <button
+                          type="button"
+                          onClick={clearExcelImport}
+                          className="text-xs font-bold text-red-600 hover:text-red-700"
+                        >
+                          Clear import
+                        </button>
+                      </div>
+
+                      <div className="mt-2 max-h-32 overflow-auto text-sm text-slate-600">
+                        {excelRecipients.slice(0, 20).map((phone) => (
+                          <p key={phone}>{phone}</p>
+                        ))}
+
+                        {excelRecipients.length > 20 ? (
+                          <p className="mt-1 text-xs text-slate-400">
+                            +{formatNumber(excelRecipients.length - 20)} more
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -450,20 +767,17 @@ export default function NewMessagePage() {
 
                     {contactGroups.map((group) => (
                       <option key={group.id} value={group.id}>
-                        {group.name} ({group.contacts?.length ?? 0} contacts)
+                        {group.name} ({formatNumber(group.contacts?.length ?? 0)} contacts)
                       </option>
                     ))}
                   </select>
 
                   {selectedGroup ? (
                     <p className="text-xs leading-5 text-slate-400">
-                      This will send to {selectedGroupRecipientCount} active
+                      This will send to {formatNumber(selectedGroupRecipientCount)} active
                       contact
                       {selectedGroupRecipientCount === 1 ? '' : 's'} in{' '}
-                      <span className="font-semibold">
-                        {selectedGroup.name}
-                      </span>
-                      .
+                      <span className="font-semibold">{selectedGroup.name}</span>.
                     </p>
                   ) : (
                     <p className="text-xs leading-5 text-slate-400">
@@ -478,7 +792,7 @@ export default function NewMessagePage() {
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                   <label className={ui.label}>Message</label>
                   <span className="text-xs text-slate-400">
-                    {characterCount}/1600 · {estimatedSegments} segment
+                    {formatNumber(characterCount)}/1,600 · {formatNumber(estimatedSegments)} segment
                     {estimatedSegments === 1 ? '' : 's'}
                   </span>
                 </div>
@@ -531,7 +845,7 @@ export default function NewMessagePage() {
               <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center">
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || excelLoading}
                   className="inline-flex w-full items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
                 >
                   {submitButtonText}
@@ -567,26 +881,28 @@ export default function NewMessagePage() {
                     ? 'Single number'
                     : targetMode === 'multiple'
                       ? 'Multiple numbers'
-                      : 'Contact group'
+                      : targetMode === 'excel'
+                        ? 'Excel import'
+                        : 'Contact group'
                 }
               />
 
-              <SummaryRow label="Characters" value={characterCount} />
+              <SummaryRow label="Characters" value={formatNumber(characterCount)} />
 
               <SummaryRow
                 label="Estimated segments"
-                value={estimatedSegments}
+                value={formatNumber(estimatedSegments)}
               />
 
               <SummaryRow
                 label="Recipients"
-                value={estimatedRecipientCount || 'Not set'}
+                value={estimatedRecipientCount ? formatNumber(estimatedRecipientCount) : 'Not set'}
               />
 
               {estimatedRecipientCount > 0 ? (
                 <SummaryRow
                   label="Estimated SMS usage"
-                  value={estimatedTotalSegments || estimatedRecipientCount}
+                  value={formatNumber(estimatedTotalSegments || estimatedRecipientCount)}
                 />
               ) : null}
 
@@ -600,29 +916,14 @@ export default function NewMessagePage() {
                   value={selectedGroup?.name || 'Not set'}
                 />
               ) : null}
-            </div>
-          </div>
 
-          {isBulkMode ? (
-            <div className="rounded-2xl border border-yellow-100 bg-yellow-50 p-5">
-              <p className="text-sm font-bold text-yellow-900">
-                Bulk SMS behavior
-              </p>
-              <p className="mt-2 text-sm leading-6 text-yellow-800">
-                Bulk SMS creates one message per recipient. Each recipient gets
-                separate delivery tracking, retry status, and quota usage.
-              </p>
+              {targetMode === 'excel' ? (
+                <SummaryRow
+                  label="Imported file"
+                  value={excelFileName || 'Not set'}
+                />
+              ) : null}
             </div>
-          ) : null}
-
-          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-5">
-            <p className="text-sm font-bold text-emerald-900">
-              Scheduling behavior
-            </p>
-            <p className="mt-2 text-sm leading-6 text-emerald-700">
-              Scheduled messages remain in the scheduled list until their time
-              arrives. You can cancel them before execution.
-            </p>
           </div>
 
           <Link
@@ -634,17 +935,17 @@ export default function NewMessagePage() {
             </p>
             <p className="mt-2 text-sm leading-6 text-blue-700">
               View pending scheduled SMS messages and cancel them before
-              execution.
+              execution, if you want.
             </p>
           </Link>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm font-bold text-slate-900">Delivery status</p>
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              Messages move to <span className="font-semibold">sent</span> when
-              accepted by the gateway. They become{' '}
-              <span className="font-semibold">delivered</span> only after a DLR
-              callback is received.
+          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-5">
+            <p className="text-sm font-bold text-emerald-900">
+              Excel import format
+            </p>
+            <p className="mt-2 text-sm leading-6 text-emerald-700">
+              Your file should contain a phone number column named phone,
+              phoneNumber, mobile, recipient, or number.
             </p>
           </div>
         </aside>

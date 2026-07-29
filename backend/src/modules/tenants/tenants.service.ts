@@ -22,6 +22,7 @@ import {
   QuotaTransaction,
   QuotaTransactionType,
 } from './entities/quota-transaction.entity';
+import { TenantStatusHistory } from './entities/tenant-status-history.entity';
 
 @Injectable()
 export class TenantsService {
@@ -34,6 +35,9 @@ export class TenantsService {
 
     @InjectRepository(QuotaTransaction)
     private readonly quotaTransactionsRepository: Repository<QuotaTransaction>,
+
+    @InjectRepository(TenantStatusHistory)
+    private readonly tenantStatusHistoryRepository: Repository<TenantStatusHistory>,
   ) {}
 
   async create(nameOrDto: string | CreateTenantDto) {
@@ -82,7 +86,7 @@ export class TenantsService {
       throw new NotFoundException('Tenant not found');
     }
 
-    return tenant;
+    return this.syncTenantLifecycle(tenant);
   }
 
   async update(id: string, dto: UpdateTenantDto) {
@@ -108,6 +112,10 @@ export class TenantsService {
 
     if (dto.status !== undefined) tenant.status = dto.status;
 
+    if (dto.subscriptionStatus !== undefined) {
+      tenant.subscriptionStatus = dto.subscriptionStatus;
+    }
+
     if (dto.commercialTier !== undefined) {
       tenant.commercialTier = dto.commercialTier;
     }
@@ -130,18 +138,40 @@ export class TenantsService {
   async getUsageStats(tenantId: string) {
     const tenant = await this.findById(tenantId);
 
+    const remainingSms = Math.max(0, tenant.smsQuota - tenant.smsUsed);
+    const usagePercent =
+      tenant.smsQuota > 0
+        ? Number(((tenant.smsUsed / tenant.smsQuota) * 100).toFixed(1))
+        : 0;
+
+    const canSend =
+      (tenant.status === TenantStatus.ACTIVE ||
+        tenant.status === TenantStatus.TRIAL) &&
+      tenant.subscriptionStatus === SubscriptionStatus.ACTIVE &&
+      remainingSms > 0;
+
+    let blockedReason: string | null = null;
+
+    if (tenant.status !== TenantStatus.ACTIVE && tenant.status !== TenantStatus.TRIAL) {
+      blockedReason = `Tenant is ${tenant.status}`;
+    } else if (tenant.subscriptionStatus !== SubscriptionStatus.ACTIVE) {
+      blockedReason = 'Subscription is not active';
+    } else if (remainingSms <= 0) {
+      blockedReason = 'SMS quota exhausted';
+    }
+
     return {
       smsQuota: tenant.smsQuota,
       smsUsed: tenant.smsUsed,
-      remainingSms: Math.max(0, tenant.smsQuota - tenant.smsUsed),
-      usagePercent:
-        tenant.smsQuota > 0
-          ? Number(((tenant.smsUsed / tenant.smsQuota) * 100).toFixed(1))
-          : 0,
+      remainingSms,
+      usagePercent,
+      canSend,
+      blockedReason,
       tenantStatus: tenant.status,
       commercialTier: tenant.commercialTier,
       messagePriority: tenant.messagePriority,
       subscriptionStatus: tenant.subscriptionStatus,
+      subscriptionStartDate: tenant.subscriptionStartDate,
       subscriptionEndDate: tenant.subscriptionEndDate,
     };
   }
@@ -207,7 +237,7 @@ export class TenantsService {
       amount: -count,
       balanceBefore,
       balanceAfter,
-      reason: 'SMS usage',
+      reason: count === 1 ? 'SMS sent' : `${count} SMS messages sent`,
       referenceId,
       createdByUserId: actorUserId,
     });
@@ -315,5 +345,148 @@ export class TenantsService {
     await this.quotaTransactionsRepository.save(transaction);
 
     return savedTenant;
+  }
+
+  private async syncTenantLifecycle(tenant: Tenant) {
+    if (
+      tenant.subscriptionEndDate &&
+      tenant.subscriptionEndDate < new Date() &&
+      tenant.subscriptionStatus === SubscriptionStatus.ACTIVE
+    ) {
+      tenant.status = TenantStatus.EXPIRED;
+      tenant.subscriptionStatus = SubscriptionStatus.EXPIRED;
+
+      const reason = `Auto expired on ${new Date().toISOString()}`;
+
+      tenant.notes = tenant.notes
+        ? `${tenant.notes}\n${reason}`
+        : reason;
+
+      return this.tenantsRepository.save(tenant);
+    }
+
+    return tenant;
+  }
+
+  private async createStatusHistory(input: {
+    tenantId: string;
+    previousStatus?: TenantStatus | null;
+    newStatus: TenantStatus;
+    previousSubscriptionStatus?: SubscriptionStatus | null;
+    newSubscriptionStatus: SubscriptionStatus;
+    reason?: string | null;
+    changedByUserId?: string | null;
+  }) {
+    const history = this.tenantStatusHistoryRepository.create({
+      tenantId: input.tenantId,
+      previousStatus: input.previousStatus ?? null,
+      newStatus: input.newStatus,
+      previousSubscriptionStatus: input.previousSubscriptionStatus ?? null,
+      newSubscriptionStatus: input.newSubscriptionStatus,
+      reason: input.reason ?? null,
+      changedByUserId: input.changedByUserId ?? null,
+    });
+
+    return this.tenantStatusHistoryRepository.save(history);
+  }
+
+  async suspendTenant(
+    tenantId: string,
+    reason?: string,
+    actorUserId?: string,
+  ) {
+    const tenant = await this.findById(tenantId);
+
+    const previousStatus = tenant.status;
+    const previousSubscriptionStatus = tenant.subscriptionStatus;
+
+    tenant.status = TenantStatus.SUSPENDED;
+    tenant.subscriptionStatus = SubscriptionStatus.SUSPENDED;
+
+    const savedTenant = await this.tenantsRepository.save(tenant);
+
+    await this.createStatusHistory({
+      tenantId,
+      previousStatus,
+      newStatus: TenantStatus.SUSPENDED,
+      previousSubscriptionStatus,
+      newSubscriptionStatus: SubscriptionStatus.SUSPENDED,
+      reason,
+      changedByUserId: actorUserId,
+    });
+
+    return savedTenant;
+  }
+
+  async reactivateTenant(tenantId: string, actorUserId?: string) {
+    const tenant = await this.findById(tenantId);
+
+    if (tenant.subscriptionEndDate && tenant.subscriptionEndDate < new Date()) {
+      throw new BadRequestException(
+        'Cannot reactivate tenant because subscription has expired',
+      );
+    }
+
+    const previousStatus = tenant.status;
+    const previousSubscriptionStatus = tenant.subscriptionStatus;
+
+    tenant.status = TenantStatus.ACTIVE;
+    tenant.subscriptionStatus = SubscriptionStatus.ACTIVE;
+
+    const savedTenant = await this.tenantsRepository.save(tenant);
+
+    await this.createStatusHistory({
+      tenantId,
+      previousStatus,
+      newStatus: TenantStatus.ACTIVE,
+      previousSubscriptionStatus,
+      newSubscriptionStatus: SubscriptionStatus.ACTIVE,
+      reason: 'Tenant reactivated',
+      changedByUserId: actorUserId,
+    });
+
+    return savedTenant;
+  }
+
+  async expireTenant(
+    tenantId: string,
+    reason?: string,
+    actorUserId?: string,
+  ) {
+    const tenant = await this.findById(tenantId);
+
+    const previousStatus = tenant.status;
+    const previousSubscriptionStatus = tenant.subscriptionStatus;
+
+    tenant.status = TenantStatus.EXPIRED;
+    tenant.subscriptionStatus = SubscriptionStatus.EXPIRED;
+
+    const savedTenant = await this.tenantsRepository.save(tenant);
+
+    await this.createStatusHistory({
+      tenantId,
+      previousStatus,
+      newStatus: TenantStatus.EXPIRED,
+      previousSubscriptionStatus,
+      newSubscriptionStatus: SubscriptionStatus.EXPIRED,
+      reason,
+      changedByUserId: actorUserId,
+    });
+
+    return savedTenant;
+  }
+
+  async getStatusHistory(tenantId: string) {
+    await this.findById(tenantId);
+
+    return this.tenantStatusHistoryRepository.find({
+      where: {
+        tenantId,
+      },
+      order: {
+        createdAt: 'DESC',
+      },
+      take: 100,
+    });
   }
 }

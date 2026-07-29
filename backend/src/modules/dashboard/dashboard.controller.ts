@@ -22,7 +22,13 @@ export class DashboardController {
       user: CurrentUser;
     },
     @Query('period') period: DashboardPeriod = 'month',
+    @Query('tenantId') tenantId?: string,
+    @Query('companyId') companyId?: string,
   ) {
-    return this.dashboardService.getStats(req.user, period);
+    return this.dashboardService.getStats(
+      req.user,
+      period,
+      tenantId || companyId,
+    );
   }
 }

@@ -34,4 +34,8 @@ export class CreateCampaignDto {
   @IsOptional()
   @IsString()
   scheduledAt?: string;
+
+  @IsOptional()
+  @IsUUID('4')
+  templateId?: string;
 }
